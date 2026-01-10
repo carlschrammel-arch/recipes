@@ -1,0 +1,93 @@
+[
+  {
+    "name": "Classic Chocolate Chip Cookies",
+    "source": "Baker's Delight",
+    "source_url": "https://example.com/cookies",
+    "servings": "24 cookies",
+    "prep_time": "15 minutes",
+    "cook_time": "12 minutes",
+    "ingredients": [
+      "2 1/4 cups all-purpose flour",
+      "1 tsp baking soda",
+      "1 tsp salt",
+      "1 cup (2 sticks) butter, softened",
+      "3/4 cup granulated sugar",
+      "3/4 cup packed brown sugar",
+      "2 large eggs",
+      "1 tsp vanilla extract",
+      "2 cups chocolate chips"
+    ],
+    "directions": [
+      "Preheat oven to 375°F.",
+      "Combine flour, baking soda and salt in small bowl.",
+      "Beat butter, granulated sugar, brown sugar and vanilla extract in large mixer bowl until creamy.",
+      "Add eggs, one at a time, beating well after each addition.",
+      "Gradually beat in flour mixture.",
+      "Stir in chocolate chips.",
+      "Drop rounded tablespoon of dough onto ungreased baking sheets.",
+      "Bake for 9 to 11 minutes or until golden brown.",
+      "Cool on baking sheets for 2 minutes; remove to wire racks to cool completely."
+    ],
+    "categories": ["Dessert", "Cookies", "Baking", "Kid-Friendly"],
+    "notes": "For softer cookies, bake for 9 minutes. For crispier cookies, bake for 11 minutes.",
+    "nutritional_info": "Calories: 150, Fat: 8g, Carbs: 19g, Protein: 2g"
+  },
+  {
+    "name": "Quick Tomato Soup",
+    "source": "Comfort Food Kitchen",
+    "servings": "6 servings",
+    "prep_time": "10 minutes",
+    "cook_time": "25 minutes",
+    "ingredients": [
+      "2 cans (28 oz each) whole peeled tomatoes",
+      "2 tablespoons olive oil",
+      "1 large onion, diced",
+      "4 cloves garlic, minced",
+      "2 cups vegetable broth",
+      "1/2 cup heavy cream",
+      "1 teaspoon sugar",
+      "Salt and pepper to taste",
+      "Fresh basil for garnish"
+    ],
+    "directions": [
+      "Heat olive oil in a large pot over medium heat.",
+      "Add onion and cook until softened, about 5 minutes.",
+      "Add garlic and cook 1 minute more.",
+      "Add tomatoes with their juice, broth, and sugar.",
+      "Bring to a boil, then reduce heat and simmer 15 minutes.",
+      "Use an immersion blender to puree until smooth.",
+      "Stir in cream and season with salt and pepper.",
+      "Serve hot, garnished with fresh basil."
+    ],
+    "categories": ["Soup", "Vegetarian", "Comfort Food", "Easy"],
+    "notes": "Great served with grilled cheese sandwiches!"
+  },
+  {
+    "name": "Sheet Pan Salmon with Vegetables",
+    "source": "Healthy Eats",
+    "source_url": "https://example.com/salmon",
+    "servings": "4 servings",
+    "prep_time": "10 minutes",
+    "cook_time": "20 minutes",
+    "ingredients": [
+      "4 salmon fillets (6 oz each)",
+      "1 lb asparagus, trimmed",
+      "2 cups cherry tomatoes",
+      "3 tablespoons olive oil",
+      "3 cloves garlic, minced",
+      "1 lemon, sliced",
+      "1 teaspoon dried dill",
+      "Salt and pepper to taste"
+    ],
+    "directions": [
+      "Preheat oven to 400°F. Line a sheet pan with parchment paper.",
+      "Arrange asparagus and tomatoes on the sheet pan. Drizzle with 2 tablespoons olive oil.",
+      "Season salmon with remaining oil, garlic, dill, salt, and pepper.",
+      "Nestle salmon fillets among the vegetables. Top with lemon slices.",
+      "Roast for 15-20 minutes until salmon is cooked through and vegetables are tender.",
+      "Serve immediately."
+    ],
+    "categories": ["Seafood", "Healthy", "Sheet Pan", "Weeknight", "Low-Carb"],
+    "nutritional_info": "Calories: 420, Protein: 38g, Fat: 24g, Carbs: 12g"
+  }
+]
