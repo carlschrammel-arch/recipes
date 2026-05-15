@@ -24,6 +24,9 @@ import type {
   IngredientWasteClass,
   PlanAlternative,
   PlanAlternativeEntry,
+  PreferredIngredientCoverage,
+  RequestFitSummary,
+  SuggestedSwap,
 } from './types.js';
 import type { NormalizedRecipe } from '../types.js';
 import type { SelectionRecord } from '../selection-index.js';
@@ -162,30 +165,6 @@ function enforceRequiredSingletons(
 ): { plan: PartialPlan; warnings: string[] } {
   const warnings: string[] = [];
 
-  // ---- HelloFresh requirement ----
-  if (request.requiredSourceSignals?.includes('hellofresh')) {
-    const hasHF = [...plan.assignments.values()].some((r) => r.sel.is_hellofresh);
-    if (!hasHF) {
-      const swap = findBestSingletonSwap(
-        plan, candidatesBySlot,
-        (c) => c.recipe.sel.is_hellofresh
-      );
-      if (swap) {
-        const { slot, candidate } = swap;
-        const removedId = plan.assignments.get(slot)?.norm.id;
-        plan = clonePartialPlan(plan);
-        plan.assignments.set(slot, candidate.recipe);
-        if (removedId) plan.usedIds.delete(removedId);
-        plan.usedIds.add(candidate.recipe.norm.id);
-      } else {
-        warnings.push(
-          'HelloFresh requirement: no HelloFresh recipes found in any candidate pool. ' +
-          'Check that your catalog contains HelloFresh recipes (run "recipe-context build" to refresh).'
-        );
-      }
-    }
-  }
-
   // ---- Pasta requirement ----
   if (request.requiredTagsOrTitleTerms?.includes('pasta')) {
     const hasPasta = [...plan.assignments.values()].some((r) => r.sel.is_pasta);
@@ -256,6 +235,7 @@ function enforceRequiredSingletons(
       (r) => r.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
     ).length;
 
+
     while (kidCount < request.minKidFriendlyMeals) {
       const swap = findBestSingletonSwap(
         plan,
@@ -264,6 +244,7 @@ function enforceRequiredSingletons(
         // Skip slots whose current recipe is already kid-friendly
         (current) => current.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
       );
+
       if (!swap) break; // No more kid-friendly candidates available
       const { slot, candidate } = swap;
       const removedId = plan.assignments.get(slot)?.norm.id;
@@ -282,12 +263,93 @@ function enforceRequiredSingletons(
     }
   }
 
+  // ---- HelloFresh requirement (runs LAST so it isn't undone by other enforcement) ----
+  if (request.requiredSourceSignals?.includes('hellofresh')) {
+    const hasHF = [...plan.assignments.values()].some((r) => r.sel.is_hellofresh);
+    if (!hasHF) {
+      // Prefer swapping a non-kid-friendly slot so we don't undo kid-friendly enforcement
+      const kidFriendlyMealsNeeded = request.minKidFriendlyMeals ?? 0;
+      const currentKidCount = [...plan.assignments.values()].filter(
+        (r) => r.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+      ).length;
+      const skipKidFriendlySlots = currentKidCount <= kidFriendlyMealsNeeded;
+
+      const swap = findBestSingletonSwap(
+        plan, candidatesBySlot,
+        (c) => c.recipe.sel.is_hellofresh,
+        // If we've exactly met kid-friendly requirement, avoid displacing kid-friendly recipes
+        skipKidFriendlySlots
+          ? (current) => current.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+          : undefined
+      );
+      if (swap) {
+        const { slot, candidate } = swap;
+        const removedId = plan.assignments.get(slot)?.norm.id;
+        plan = clonePartialPlan(plan);
+        plan.assignments.set(slot, candidate.recipe);
+        if (removedId) plan.usedIds.delete(removedId);
+        plan.usedIds.add(candidate.recipe.norm.id);
+      } else {
+        warnings.push(
+          'HelloFresh requirement: no HelloFresh recipes found in any candidate pool. ' +
+          'Check that your catalog contains HelloFresh recipes (run "recipe-context build" to refresh).'
+        );
+      }
+    }
+  }
+
+  // ---- Pasta concentration limiter (cap at max 2 pasta dishes) ----
+  {
+    const MAX_PASTA = 2;
+    const pastaEntries = [...plan.assignments.entries()].filter(([, r]) => r.sel.is_pasta);
+    if (pastaEntries.length > MAX_PASTA) {
+      const pastaRequired = request.requiredTagsOrTitleTerms?.includes('pasta') ?? false;
+      const requiredSrcSignals = request.requiredSourceSignals ?? [];
+
+      // Sort pasta dishes by score ascending (swap lowest-scoring ones first)
+      const sortedPasta = pastaEntries
+        .map(([slot, recipe]) => {
+          const slotScore =
+            candidatesBySlot
+              .get(slot)
+              ?.find((c) => c.recipe.norm.id === recipe.norm.id)?.score.score ?? 0;
+          return { slot, recipe, slotScore };
+        })
+        .sort((a, b) => a.slotScore - b.slotScore);
+
+      let pastaCount = pastaEntries.length;
+      for (const { slot, recipe } of sortedPasta) {
+        if (pastaCount <= MAX_PASTA) break;
+
+        // Never remove our only HelloFresh dish if HF is required
+        if (recipe.sel.is_hellofresh && requiredSrcSignals.includes('hellofresh')) {
+          const otherHF = [...plan.assignments.values()].filter(
+            (r) => r.sel.is_hellofresh && r.norm.id !== recipe.norm.id
+          );
+          if (otherHF.length === 0) continue;
+        }
+
+        // Never remove the last pasta if pasta is required
+        if (pastaRequired && pastaCount <= 1) continue;
+
+        const candidates = candidatesBySlot.get(slot) ?? [];
+        const alt = candidates.find(
+          (c) => !c.recipe.sel.is_pasta && !plan.usedIds.has(c.recipe.norm.id)
+        );
+        if (alt) {
+          const removedId = plan.assignments.get(slot)?.norm.id;
+          plan = clonePartialPlan(plan);
+          plan.assignments.set(slot, alt.recipe);
+          if (removedId) plan.usedIds.delete(removedId);
+          plan.usedIds.add(alt.recipe.norm.id);
+          pastaCount--;
+        }
+      }
+    }
+  }
+
   return { plan, warnings };
 }
-
-// ============================================================================
-// Source diversity enforcement
-// ============================================================================
 
 /**
  * Prevent any single recipe source from dominating the plan.
@@ -315,7 +377,8 @@ function enforceSourceDiversity(
   for (let pass = 0; pass < totalSlots; pass++) {
     const sourceCounts = new Map<string, string[]>(); // source → array of slot keys
     for (const [slot, recipe] of plan.assignments) {
-      const src = recipe.norm.source_name ?? recipe.sel.source_normalized ?? '';
+      // Use a per-recipe fallback for null sources so they don't all group together
+      const src = recipe.norm.source_name ?? recipe.sel.source_normalized ?? `_unknown_${recipe.norm.id}`;
       if (!sourceCounts.has(src)) sourceCounts.set(src, []);
       sourceCounts.get(src)!.push(slot);
     }
@@ -324,7 +387,8 @@ function enforceSourceDiversity(
     for (const [src, slots] of sourceCounts) {
       const srcLower = src.toLowerCase();
       if (slots.length <= maxFromOneSource) continue;
-      if (requiredSources.has(srcLower)) continue;
+      // Use partial match so "hellofresh.co.uk" is recognized when "hellofresh" is required
+      if ([...requiredSources].some((req) => srcLower.includes(req))) continue;
 
       // Find the slot with the worst-scoring recipe from this over-represented source
       const slotsByScore = slots
@@ -337,15 +401,38 @@ function enforceSourceDiversity(
         })
         .sort((a, b) => a.slotScore - b.slotScore); // worst first
 
+      // Current kid-friendly count (needed to avoid violating minKidFriendlyMeals)
+      const kidFriendlyMin = request.minKidFriendlyMeals ?? 0;
+      const currentKidCount = [...plan.assignments.values()].filter(
+        (r) => r.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+      ).length;
+
       // Try to swap the worst-scoring same-source recipe with the best alternative
       // from a different source
       for (const { slot, recipe: worstRecipe } of slotsByScore) {
+        const isKidFriendly = worstRecipe.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD;
+        const wouldViolateKidMin = isKidFriendly && currentKidCount <= kidFriendlyMin;
+
         const candidates = candidatesBySlot.get(slot) ?? [];
-        const alternative = candidates.find(
-          (c) =>
-            !plan.usedIds.has(c.recipe.norm.id) &&
-            (c.recipe.norm.source_name ?? c.recipe.sel.source_normalized ?? '') !== src
-        );
+
+        // If swapping this recipe would drop below minKidFriendlyMeals, require
+        // the replacement to also be kid-friendly
+        const alternative = wouldViolateKidMin
+          ? candidates.find(
+              (c) =>
+                !plan.usedIds.has(c.recipe.norm.id) &&
+                (c.recipe.norm.source_name ?? c.recipe.sel.source_normalized ?? '') !== src &&
+                c.recipe.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+            ) ??
+            candidates.find(
+              // Fallback: skip this slot entirely (alternative will be undefined if no kf replacement)
+              (_c) => false
+            )
+          : candidates.find(
+              (c) =>
+                !plan.usedIds.has(c.recipe.norm.id) &&
+                (c.recipe.norm.source_name ?? c.recipe.sel.source_normalized ?? '') !== src
+            );
         if (alternative) {
           plan = clonePartialPlan(plan);
           plan.usedIds.delete(worstRecipe.norm.id);
@@ -568,26 +655,37 @@ function computePlanLevelScore(
     }
   }
 
-  // Variety penalty: discourage repetition of the same recipe type
-  if (request.goals.varietyOfFlavors) {
+  // Variety penalty: discourage repetition of the same recipe type.
+  // Always applied under health/diet goals; additionally applied when varietyOfFlavors is set.
+  const hasHealthGoal =
+    request.goals.weightLoss ||
+    request.goals.highProtein ||
+    request.goals.lowFat ||
+    request.goals.varietyOfFlavors;
+
+  if (hasHealthGoal) {
     let varietyPenalty = 0;
 
     const pastaCount = selectedRecipes.filter((r) => r.sel.is_pasta).length;
     const creamyPastaCount = selectedRecipes.filter(isCreamyPasta).length;
 
-    // Pasta repetition: one pasta is fine (even required), but more is penalized
+    // Pasta repetition: one pasta is fine (even required), but more is penalized.
+    // The penalty is stronger under weight-loss / high-protein goals.
+    const pastaRepeatPenalty = (request.goals.weightLoss || request.goals.highProtein || request.goals.lowFat)
+      ? 1.5
+      : 1.0;
     if (pastaCount > 1) {
-      varietyPenalty += (pastaCount - 1) * 1.0; // was 0.5 — stronger now
+      varietyPenalty += (pastaCount - 1) * pastaRepeatPenalty;
     }
 
     // Extra penalty for repeated creamy pasta specifically
     if (creamyPastaCount > 1) {
-      varietyPenalty += (creamyPastaCount - 1) * 0.8;
+      varietyPenalty += (creamyPastaCount - 1) * 1.2;
     }
 
     // Creamy pasta is particularly incompatible with weight-loss / low-fat goals
     if ((request.goals.weightLoss || request.goals.lowFat) && creamyPastaCount > 0) {
-      varietyPenalty += creamyPastaCount * 0.5;
+      varietyPenalty += creamyPastaCount * 0.8;
     }
 
     // Cuisine repetition: penalize >2 recipes from the same cuisine
@@ -639,7 +737,8 @@ function computeAlternatives(
   const selectedIds = new Set([...plan.assignments.values()].map((r) => r.norm.id));
 
   for (const [slot, candidates] of candidatesBySlot) {
-    if (slot === 'flex') continue; // Skip flex pool — too many candidates to list alternatives
+    // Skip flex slots — too many candidates to list alternatives
+    if (slot === 'flex' || slot.startsWith('flex_')) continue;
 
     const topCandidates = candidates
       .filter((c) => !selectedIds.has(c.recipe.norm.id))
@@ -662,6 +761,326 @@ function computeAlternatives(
   }
 
   return alternatives;
+}
+
+// ============================================================================
+// Flex variety enforcement
+// ============================================================================
+
+/**
+ * Post-hoc: if a flex slot repeats a protein category already covered by required
+ * slots, try to swap it for a candidate with a different protein type.
+ * This improves variety without interfering with required slot satisfaction.
+ */
+function enforceFlexVariety(
+  plan: PartialPlan,
+  candidatesBySlot: Map<string, Array<{ recipe: PlannerRecipe; score: CandidateScore }>>,
+  request?: WeeklyPlanRequest,
+): PartialPlan {
+  // Proteins covered by required (non-flex) slots
+  const requiredProteins = new Set<string>();
+  for (const [slot, recipe] of plan.assignments) {
+    if (!slot.startsWith('flex')) {
+      requiredProteins.add(recipe.sel.primary_protein);
+    }
+  }
+  if (requiredProteins.size === 0) return plan;
+
+  // Collect all flex slot keys in the plan
+  const flexSlotKeys = [...plan.assignments.keys()].filter((s) => s.startsWith('flex'));
+
+  // Priority order for flex protein diversity (seafood and plant proteins score highest)
+  const DIVERSE_PROTEIN_RANK: Record<string, number> = {
+    fish: 10,
+    seafood: 10,
+    shrimp: 10,
+    tofu: 9,
+    tempeh: 9,
+    seitan: 8,
+    lentils: 8,
+    beans: 7,
+    chickpeas: 7,
+    legumes: 7,
+    lamb: 5,
+    turkey: 5,
+    duck: 5,
+  };
+
+  for (const flexSlot of flexSlotKeys) {
+    const current = plan.assignments.get(flexSlot);
+    if (!current) continue;
+
+    // If this flex recipe uses a protein already in required slots, try to diversify
+    if (!requiredProteins.has(current.sel.primary_protein)) continue;
+
+    // Look for a scored flex candidate with a different protein, not already used.
+    // Prefer candidates with diverse (seafood/plant) proteins using DIVERSE_PROTEIN_RANK.
+    const flexCandidates = candidatesBySlot.get(flexSlot) ?? candidatesBySlot.get('flex_0') ?? [];
+
+    // Guard: if swapping the current flex recipe would drop below minKidFriendlyMeals,
+    // require the replacement to also be kid-friendly.
+    const kidMin = request?.minKidFriendlyMeals ?? 0;
+    const currentKidCount = [...plan.assignments.values()].filter(
+      (r) => r.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+    ).length;
+    const isCurrentKidFriendly = current.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD;
+    const requireKidFriendlyReplacement = isCurrentKidFriendly && currentKidCount <= kidMin;
+
+    const alternatives = flexCandidates.filter(
+      (c) =>
+        !plan.usedIds.has(c.recipe.norm.id) &&
+        !requiredProteins.has(c.recipe.sel.primary_protein) &&
+        (!requireKidFriendlyReplacement || c.recipe.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD)
+    );
+
+    if (alternatives.length === 0) continue;
+
+    // Prefer diverse proteins; break ties by candidate score descending
+    alternatives.sort((a, b) => {
+      const rankA = DIVERSE_PROTEIN_RANK[a.recipe.sel.primary_protein ?? ''] ?? 0;
+      const rankB = DIVERSE_PROTEIN_RANK[b.recipe.sel.primary_protein ?? ''] ?? 0;
+      if (rankB !== rankA) return rankB - rankA;
+      return (b.score.score ?? 0) - (a.score.score ?? 0);
+    });
+
+    const best = alternatives[0];
+    plan = clonePartialPlan(plan);
+    plan.usedIds.delete(current.norm.id);
+    plan.assignments.set(flexSlot, best.recipe);
+    plan.usedIds.add(best.recipe.norm.id);
+  }
+
+  return plan;
+}
+
+// ============================================================================
+// Preferred ingredient coverage
+// ============================================================================
+
+function computePreferredIngredientCoverage(
+  selectedRecipes: NormalizedRecipe[],
+  preferredIngredients: string[]
+): PreferredIngredientCoverage {
+  if (preferredIngredients.length === 0) {
+    return { matched: [], missing: [], coverageScore: 1.0 };
+  }
+
+  // Build a single text blob from all selected recipe ingredients
+  const allIngText = selectedRecipes
+    .flatMap((r) =>
+      r.ingredients.map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
+    )
+    .join(' ');
+
+  const matched: string[] = [];
+  const missing: string[] = [];
+
+  for (const pref of preferredIngredients) {
+    if (allIngText.includes(pref.toLowerCase())) {
+      matched.push(pref);
+    } else {
+      missing.push(pref);
+    }
+  }
+
+  return {
+    matched,
+    missing,
+    coverageScore: matched.length / preferredIngredients.length,
+  };
+}
+
+// ============================================================================
+// Request fit summary
+// ============================================================================
+
+function averageNonNull(values: (number | null)[]): number | null {
+  const valid = values.filter((v): v is number => v !== null);
+  if (valid.length === 0) return null;
+  return valid.reduce((a, b) => a + b, 0) / valid.length;
+}
+
+function computeRequestFitSummary(
+  request: WeeklyPlanRequest,
+  selectedRecipes: NormalizedRecipe[],
+  validation: WeeklyPlanResult['validation'],
+  coverage: PreferredIngredientCoverage,
+  selectedDespiteWarnings: WeeklyPlanResult['selectedDespiteWarnings']
+): RequestFitSummary {
+  const strongMatches: string[] = [];
+  const weakSpots: string[] = [];
+  const suggestedImprovements: string[] = [];
+
+  // --- Structural constraints ---
+  if (validation.structuralConstraintsSatisfied) {
+    strongMatches.push('All required protein slots filled');
+  } else {
+    for (const fc of validation.failedConstraints) {
+      weakSpots.push(`Constraint failed: ${fc}`);
+    }
+  }
+
+  // --- Macro targets ---
+  if (request.macroTargets) {
+    if (validation.nutritionEvaluationStatus === 'met') {
+      strongMatches.push('Macro targets met on average');
+    } else if (validation.nutritionEvaluationStatus === 'failed') {
+      weakSpots.push('Macro targets not fully met');
+      suggestedImprovements.push(
+        'Add more recipes with complete nutrition data or adjust macro ranges'
+      );
+    } else if (validation.nutritionEvaluationStatus === 'partial') {
+      weakSpots.push('Macro evaluation is partial — some recipes lack complete nutrition data');
+    }
+  }
+
+  // --- Protein quality (weight loss / high-protein goals) ---
+  if (request.goals.weightLoss || request.goals.highProtein) {
+    const avgProteinPct = averageNonNull(
+      selectedRecipes.map((r) =>
+        r.nutrition?.protein_g != null && r.nutrition?.calories != null && r.nutrition.calories > 0
+          ? (r.nutrition.protein_g * 4 / r.nutrition.calories) * 100
+          : null
+      )
+    );
+    if (avgProteinPct !== null) {
+      if (avgProteinPct >= 25) {
+        strongMatches.push(`High-protein plan: avg ${avgProteinPct.toFixed(0)}% protein`);
+      } else {
+        weakSpots.push(
+          `Protein content low: avg ${avgProteinPct.toFixed(0)}% (target ≥25%)`
+        );
+        suggestedImprovements.push(
+          'Swap the lowest-protein recipe for a chicken breast, fish, or legume dish'
+        );
+      }
+    }
+  }
+
+  // --- Preferred ingredient coverage ---
+  if (request.preferredIngredients.length > 0) {
+    if (coverage.coverageScore >= 0.75) {
+      strongMatches.push(
+        `Preferred ingredients: ${Math.round(coverage.coverageScore * 100)}% covered`
+      );
+    } else {
+      const missingPreview = coverage.missing.slice(0, 3).join(', ');
+      weakSpots.push(`Preferred ingredients not found: ${missingPreview}`);
+      if (coverage.missing.length > 0) {
+        suggestedImprovements.push(
+          `Look for recipes that include: ${coverage.missing[0]}`
+        );
+      }
+    }
+  }
+
+  // --- Kid-friendly minimum ---
+  if (request.minKidFriendlyMeals) {
+    const kidCount = selectedRecipes.filter((r) => r.kid_friendly_score >= 0.6).length;
+    if (kidCount >= request.minKidFriendlyMeals) {
+      strongMatches.push(`Kid-friendly: ${kidCount} of ${request.minKidFriendlyMeals} required`);
+    } else {
+      weakSpots.push(
+        `Kid-friendly: only ${kidCount} of ${request.minKidFriendlyMeals} requested`
+      );
+    }
+  }
+
+  // --- Freezer-friendly goal ---
+  if (request.goals.freezerFriendly) {
+    const freezerCount = selectedRecipes.filter(
+      (r) => r.tags?.includes('freezer_friendly') ?? false
+    ).length;
+    if (freezerCount >= Math.ceil(selectedRecipes.length / 2)) {
+      strongMatches.push(`Freezer-friendly: ${freezerCount} of ${selectedRecipes.length} recipes`);
+    } else if (freezerCount === 0) {
+      weakSpots.push('No recipes confirmed freezer-friendly');
+    }
+  }
+
+  // --- Weak selections ---
+  if (selectedDespiteWarnings && selectedDespiteWarnings.length > 0) {
+    for (const w of selectedDespiteWarnings) {
+      weakSpots.push(`"${w.title}": ${w.reasons[0]}`);
+    }
+    if (selectedDespiteWarnings.length === 1) {
+      suggestedImprovements.push(
+        `Consider swapping "${selectedDespiteWarnings[0].title}" for a better-fitting recipe`
+      );
+    } else {
+      suggestedImprovements.push(
+        `${selectedDespiteWarnings.length} recipes have goal-fit issues — see alternatives below`
+      );
+    }
+  }
+
+  // --- Overall label ---
+  let overallFitLabel: RequestFitSummary['overallFitLabel'];
+  if (weakSpots.length === 0 && validation.structuralConstraintsSatisfied) {
+    overallFitLabel = 'excellent';
+  } else if (weakSpots.length <= 1) {
+    overallFitLabel = 'good';
+  } else if (weakSpots.length <= 3) {
+    overallFitLabel = 'fair';
+  } else {
+    overallFitLabel = 'weak';
+  }
+
+  return { overallFitLabel, strongMatches, weakSpots, suggestedImprovements };
+}
+
+// ============================================================================
+// Suggested swaps
+// ============================================================================
+
+/**
+ * Generate targeted swap suggestions for the weakest-fit recipes in the plan.
+ * Uses the alternatives computed per slot as the candidate pool.
+ */
+function computeSuggestedSwaps(
+  plan: PartialPlan,
+  candidatesBySlot: Map<string, Array<{ recipe: PlannerRecipe; score: CandidateScore }>>,
+  selectedDespiteWarnings: WeeklyPlanResult['selectedDespiteWarnings']
+): SuggestedSwap[] {
+  if (!selectedDespiteWarnings || selectedDespiteWarnings.length === 0) return [];
+
+  const swaps: SuggestedSwap[] = [];
+
+  for (const warning of selectedDespiteWarnings) {
+    // Find which slot this recipe is in
+    let slot: string | undefined;
+    for (const [s, r] of plan.assignments) {
+      if (r.norm.id === warning.recipeId) {
+        slot = s;
+        break;
+      }
+    }
+    if (!slot) continue;
+
+    // Find the best non-selected alternative from this slot's candidates
+    const candidates = candidatesBySlot.get(slot) ?? [];
+    const currentCandidateScore = candidates.find(
+      (c) => c.recipe.norm.id === warning.recipeId
+    )?.score.score ?? 0;
+
+    const selectedIds = new Set([...plan.assignments.values()].map((r) => r.norm.id));
+    const alternative = candidates.find(
+      (c) => !selectedIds.has(c.recipe.norm.id)
+    );
+
+    if (alternative) {
+      swaps.push({
+        replaceRecipeId: warning.recipeId,
+        replaceTitle: warning.title,
+        replacementRecipeId: alternative.recipe.norm.id,
+        replacementTitle: alternative.recipe.norm.title,
+        reasons: warning.reasons,
+        scoreDelta: alternative.score.score - currentCandidateScore,
+      });
+    }
+  }
+
+  return swaps;
 }
 
 // ============================================================================
@@ -695,7 +1114,7 @@ function computeSelectedDespiteWarnings(
     if (request.macroTargets) {
       const { fatPct, proteinPct, carbsPct } = request.macroTargets;
 
-      if (fatPct?.maxPct !== undefined && sel.macro_pct_fat !== null) {
+      if (fatPct?.maxPct != null && sel.macro_pct_fat !== null) {
         const miss = sel.macro_pct_fat - fatPct.maxPct;
         if (miss > 10) {
           reasons.push(
@@ -703,7 +1122,7 @@ function computeSelectedDespiteWarnings(
           );
         }
       }
-      if (fatPct?.minPct !== undefined && sel.macro_pct_fat !== null) {
+      if (fatPct?.minPct != null && sel.macro_pct_fat !== null) {
         const miss = fatPct.minPct - sel.macro_pct_fat;
         if (miss > 5) {
           reasons.push(
@@ -711,7 +1130,7 @@ function computeSelectedDespiteWarnings(
           );
         }
       }
-      if (proteinPct?.minPct !== undefined && sel.macro_pct_protein !== null) {
+      if (proteinPct?.minPct != null && sel.macro_pct_protein !== null) {
         const miss = proteinPct.minPct - sel.macro_pct_protein;
         if (miss > 8) {
           reasons.push(
@@ -719,7 +1138,7 @@ function computeSelectedDespiteWarnings(
           );
         }
       }
-      if (carbsPct?.minPct !== undefined && sel.macro_pct_carbs !== null) {
+      if (carbsPct?.minPct != null && sel.macro_pct_carbs !== null) {
         const miss = carbsPct.minPct - sel.macro_pct_carbs;
         if (miss > 10) {
           reasons.push(
@@ -788,7 +1207,13 @@ export function buildWeeklyPlan(
   }
 
   // Flex slot pool (if requested)
-  if ((request.flexMealCount ?? 0) > 0) {
+  // Each flex slot gets a unique key ('flex_0', 'flex_1', ...) so multiple flex
+  // meals can coexist in the same assignments Map without overwriting each other.
+  const flexSlotKeys = Array.from(
+    { length: request.flexMealCount ?? 0 },
+    (_, i) => `flex_${i}`
+  );
+  if (flexSlotKeys.length > 0) {
     const flexCandidates = filterResult.candidatesBySlot.get('flex') ?? [];
     const scoredFlex = flexCandidates
       .map((recipe) => ({
@@ -797,13 +1222,16 @@ export function buildWeeklyPlan(
       }))
       .filter((c) => c.score.hardConstraintPass)
       .sort((a, b) => b.score.score - a.score.score);
-    scoredBySlot.set('flex', scoredFlex);
+    // Point every flex_N key to the same scored pool
+    for (const flexKey of flexSlotKeys) {
+      scoredBySlot.set(flexKey, scoredFlex);
+    }
   }
 
   // --- 3. Beam search through slots (required first, then flex) ---
   const slotOrder = [
     ...request.requiredProteinSlots,
-    ...Array(request.flexMealCount ?? 0).fill('flex'),
+    ...flexSlotKeys,
   ];
 
   let beams: PartialPlan[] = [
@@ -859,21 +1287,23 @@ export function buildWeeklyPlan(
   //         satisfied by a required slot, try to swap it for a non-pasta alternative
   //         when variety is requested. ---
   if (
-    (request.flexMealCount ?? 0) > 0 &&
+    flexSlotKeys.length > 0 &&
     request.goals.varietyOfFlavors &&
     request.requiredTagsOrTitleTerms?.includes('pasta')
   ) {
-    const slotKeys = [...bestPlan.assignments.keys()];
-    const flexSlotKeys = slotKeys.filter((s) => s === 'flex' || s.startsWith('flex'));
-    const nonFlexSlotKeys = slotKeys.filter((s) => s !== 'flex' && !s.startsWith('flex'));
-    const pastaInRequired = nonFlexSlotKeys.some((s) => bestPlan.assignments.get(s)?.sel.is_pasta);
+    const nonFlexAssignedSlots = [...bestPlan.assignments.keys()].filter(
+      (s) => !s.startsWith('flex')
+    );
+    const pastaInRequired = nonFlexAssignedSlots.some(
+      (s) => bestPlan.assignments.get(s)?.sel.is_pasta
+    );
 
     if (pastaInRequired) {
       for (const flexKey of flexSlotKeys) {
         const currentFlex = bestPlan.assignments.get(flexKey);
         if (currentFlex?.sel.is_pasta) {
           // Try to find a non-pasta flex candidate not already in plan
-          const flexCandidates = scoredBySlot.get('flex') ?? [];
+          const flexCandidates = scoredBySlot.get(flexKey) ?? [];
           const betterFlex = flexCandidates.find(
             (c) => !c.recipe.sel.is_pasta && !bestPlan.usedIds.has(c.recipe.norm.id)
           );
@@ -887,6 +1317,11 @@ export function buildWeeklyPlan(
         }
       }
     }
+  }
+
+  // --- 4d. Flex variety: if a flex slot repeats a required-slot protein, swap it ---
+  if (flexSlotKeys.length > 0) {
+    bestPlan = enforceFlexVariety(bestPlan, scoredBySlot, request);
   }
 
   // --- 5. Compute full plan-level score ---
@@ -935,6 +1370,28 @@ export function buildWeeklyPlan(
     selectedRecipes
   );
 
+  // --- 9. Preferred ingredient coverage ---
+  const preferredIngredientCoverage =
+    request.preferredIngredients.length > 0
+      ? computePreferredIngredientCoverage(selectedRecipes, request.preferredIngredients)
+      : undefined;
+
+  // --- 10. Request fit summary ---
+  const requestFitSummary = computeRequestFitSummary(
+    request,
+    selectedRecipes,
+    validation,
+    preferredIngredientCoverage ?? { matched: [], missing: [], coverageScore: 1.0 },
+    selectedDespiteWarnings.length > 0 ? selectedDespiteWarnings : undefined
+  );
+
+  // --- 11. Suggested swaps ---
+  const suggestedSwaps = computeSuggestedSwaps(
+    bestPlan,
+    scoredBySlot,
+    selectedDespiteWarnings.length > 0 ? selectedDespiteWarnings : undefined
+  );
+
   return {
     request,
     selectedRecipeIds,
@@ -945,5 +1402,8 @@ export function buildWeeklyPlan(
     validation,
     alternatives,
     selectedDespiteWarnings: selectedDespiteWarnings.length > 0 ? selectedDespiteWarnings : undefined,
+    preferredIngredientCoverage,
+    requestFitSummary,
+    suggestedSwaps: suggestedSwaps.length > 0 ? suggestedSwaps : undefined,
   };
 }

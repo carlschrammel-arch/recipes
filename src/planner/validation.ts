@@ -309,6 +309,7 @@ export function validatePlanResult(
     hardConstraintsSatisfied: structuralConstraintsSatisfied, // backward compat alias
     nutritionTargetsSatisfied: macroEval.satisfied,
     nutritionEvaluationStatus: macroEval.status,
+    macroFailedTargets: macroEval.failedTargets.length > 0 ? macroEval.failedTargets : undefined,
     warnings,
     failedConstraints: [...failedConstraints, ...nutritionFailedConstraints],
   };

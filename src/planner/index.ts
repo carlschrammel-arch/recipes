@@ -251,10 +251,12 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
 
   let selectionRecords = allSelectionRecords;
   let historyExclusionReport: PlanOutput['historyExclusion'] = null;
+  let historyExcludedRecords: SelectionRecord[] = [];
 
   if (excludeHistory) {
     const exclusionResult = await applyHistoryExclusion(options.dataPath, allSelectionRecords);
     selectionRecords = exclusionResult.available;
+    historyExcludedRecords = exclusionResult.excluded.map((e) => e.record);
     historyExclusionReport = {
       historyPath: exclusionResult.historyPath,
       historyCount: exclusionResult.historyCount,
@@ -297,6 +299,27 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
     parsedRequest = parseResult.request;
     usedFallback = parseResult.usedFallback;
     parseWarnings = parseResult.parseWarnings;
+  }
+
+  // Re-add required-source recipes that were excluded by history.
+  // When a source is explicitly required (e.g. HelloFresh), history exclusion
+  // must not make it impossible to satisfy that constraint.  We add back any
+  // excluded record matching a required source signal so the singleton enforcer
+  // can find it.
+  if (historyExcludedRecords.length > 0 && parsedRequest.requiredSourceSignals?.length) {
+    const missingSources = parsedRequest.requiredSourceSignals.filter((sig) => {
+      const s = sig.toLowerCase();
+      return !selectionRecords.some(
+        (r) => r.source_normalized.toLowerCase().includes(s) || (r.is_hellofresh && s === 'hellofresh')
+      );
+    });
+    for (const sig of missingSources) {
+      const s = sig.toLowerCase();
+      const restored = historyExcludedRecords.filter(
+        (r) => r.source_normalized.toLowerCase().includes(s) || (r.is_hellofresh && s === 'hellofresh')
+      );
+      selectionRecords = [...selectionRecords, ...restored];
+    }
   }
 
   // -------------------------------------------------------------------------

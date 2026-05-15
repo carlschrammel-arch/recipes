@@ -97,6 +97,8 @@ function formatBadges(recipe: NormalizedRecipe): string {
 }
 
 function slugProtein(slot: string): string {
+  // Handle flex_N slot keys (flex_0, flex_1, etc.)
+  if (slot === 'flex' || slot.startsWith('flex_')) return '🍽️ Flex';
   const map: Record<string, string> = {
     chicken: '🐓 Chicken',
     beef: '🥩 Beef',
@@ -147,10 +149,14 @@ export function renderPlanAsMarkdown(
   const lines: string[] = [];
   const { request, selectedRecipes, shoppingOverlap, validation, alternatives } = result;
 
-  // Effective slot list: required + flex
+  // Effective slot list: required + flex (using unique flex_N keys to match optimizer)
+  const flexSlotKeys = Array.from(
+    { length: request.flexMealCount ?? 0 },
+    (_, i) => `flex_${i}`
+  );
   const effectiveSlots: string[] = [
     ...request.requiredProteinSlots,
-    ...Array(request.flexMealCount ?? 0).fill('flex'),
+    ...flexSlotKeys,
   ];
 
   // ---- Header ----
@@ -182,7 +188,44 @@ export function renderPlanAsMarkdown(
       : `- **${label}**: _(no candidate found)_`
     );
   }
+
+  // Preferred ingredient coverage
+  if (result.preferredIngredientCoverage && request.preferredIngredients.length > 0) {
+    const cov = result.preferredIngredientCoverage;
+    const pct = Math.round(cov.coverageScore * 100);
+    if (cov.matched.length > 0) {
+      lines.push(`\n**Preferred ingredients covered (${pct}%):** ${cov.matched.join(', ')}`);
+    }
+    if (cov.missing.length > 0) {
+      lines.push(`**Not found in plan:** ${cov.missing.join(', ')}`);
+    }
+  }
+
   lines.push('');
+
+  // ---- Request Fit Summary ----
+  if (result.requestFitSummary) {
+    const fit = result.requestFitSummary;
+    const fitEmoji = { excellent: '✨', good: '✅', fair: '⚠️', weak: '❌' }[fit.overallFitLabel];
+    lines.push('## Plan Fit Summary\n');
+    lines.push(`**Overall fit: ${fitEmoji} ${fit.overallFitLabel.charAt(0).toUpperCase() + fit.overallFitLabel.slice(1)}**\n`);
+
+    if (fit.strongMatches.length > 0) {
+      lines.push('**✅ Strong matches:**');
+      for (const m of fit.strongMatches) lines.push(`- ${m}`);
+      lines.push('');
+    }
+    if (fit.weakSpots.length > 0) {
+      lines.push('**⚠️ Weak spots:**');
+      for (const w of fit.weakSpots) lines.push(`- ${w}`);
+      lines.push('');
+    }
+    if (fit.suggestedImprovements.length > 0) {
+      lines.push('**💡 Suggested improvements:**');
+      for (const s of fit.suggestedImprovements) lines.push(`- ${s}`);
+      lines.push('');
+    }
+  }
 
   // ---- Plan-average nutrition ----
   const withAllMacros = selectedRecipes.filter(
@@ -408,14 +451,19 @@ export function renderPlanAsMarkdown(
         break;
       case 'failed':
         macroStatus = '❌';
-        macroNotes = validation.failedConstraints
-          .filter((c) => c.startsWith('nutrition_target:'))
-          .map((c) => c.replace('nutrition_target:', ''))
-          .join('; ') || 'Targets not met';
+        macroNotes = (validation.macroFailedTargets ?? []).join('; ') ||
+          validation.failedConstraints
+            .filter((c) => c.startsWith('nutrition_target:'))
+            .map((c) => c.replace('nutrition_target:', ''))
+            .join('; ') ||
+          'Targets not met';
         break;
       case 'partial':
         macroStatus = '⚠️';
-        macroNotes = `Partially evaluated; ${withAllMacros.length} of ${selectedRecipes.length} recipes had complete macro data`;
+        {
+          const partialDetails = (validation.macroFailedTargets ?? []).join('; ');
+          macroNotes = `Partially evaluated; ${withAllMacros.length} of ${selectedRecipes.length} recipes had complete macro data${partialDetails ? `: ${partialDetails}` : ''}`;
+        }
         break;
       default:
         macroStatus = '—';
@@ -470,6 +518,21 @@ export function renderPlanAsMarkdown(
       lines.push(`**${slugProtein(alt.slot)} alternatives:**`);
       for (const entry of alt.entries.slice(0, 3)) {
         lines.push(`- ${entry.title} (\`${entry.id}\`) — ${entry.reason}`);
+      }
+      lines.push('');
+    }
+  }
+
+  // ---- Suggested swaps ----
+  if (result.suggestedSwaps && result.suggestedSwaps.length > 0) {
+    lines.push('## 🔀 Suggested Swaps\n');
+    lines.push('_Targeted replacements that would improve plan-goal alignment:_\n');
+    for (const swap of result.suggestedSwaps) {
+      lines.push(`**Swap out:** ${swap.replaceTitle}`);
+      lines.push(`**Swap in:** ${swap.replacementTitle} (\`${swap.replacementRecipeId}\`)`);
+      lines.push(`**Why:** ${swap.reasons.join('; ')}`);
+      if (swap.scoreDelta > 0) {
+        lines.push(`**Score improvement:** +${swap.scoreDelta.toFixed(2)}`);
       }
       lines.push('');
     }

@@ -104,6 +104,15 @@ export interface WeeklyPlanRequest {
   /** Whether a comfort-food recipe is acceptable (if false, deprioritize). */
   allowComfortFood?: boolean;
 
+  /**
+   * Controls how comfort food is treated in the plan:
+   * - 'allowed'  : acceptable but not prioritised (default when allowComfortFood=true).
+   * - 'preferred': give a meaningful bonus to comfort-food recipes.
+   * - 'required' : treat like a singleton constraint (at least one comfort dish).
+   * - 'avoid'    : apply a mild penalty to comfort-heavy recipes.
+   */
+  comfortFoodMode?: 'allowed' | 'preferred' | 'required' | 'avoid';
+
   /** Override for max alternatives to show per slot (default 3). */
   maxResults?: number;
 }
@@ -183,6 +192,12 @@ export interface PlanValidation {
    * 'unknown' — no macro targets were requested, or no recipes had any nutrition data.
    */
   nutritionEvaluationStatus: 'met' | 'failed' | 'partial' | 'unknown';
+  /**
+   * Per-macro failure details when nutritionEvaluationStatus is 'failed' or 'partial'.
+   * Each entry describes one macro that missed its target, e.g.
+   * "protein avg 18.2% outside 25-100%".
+   */
+  macroFailedTargets?: string[];
   warnings: string[];
   failedConstraints: string[];
 }
@@ -205,6 +220,40 @@ export interface PlanAlternative {
    */
   recipeIds: string[];
   reason: string;
+}
+
+/** Plan-level coverage of the user's preferred ingredients. */
+export interface PreferredIngredientCoverage {
+  /** Preferred ingredients found in at least one selected recipe. */
+  matched: string[];
+  /** Preferred ingredients not found in any selected recipe. */
+  missing: string[];
+  /** Fraction covered (0–1). 1.0 when no preferred ingredients were requested. */
+  coverageScore: number;
+}
+
+/** Deterministic, goal-aware summary of overall plan fitness. */
+export interface RequestFitSummary {
+  /** Overall fit quality label. */
+  overallFitLabel: 'excellent' | 'good' | 'fair' | 'weak';
+  /** Goals and constraints that are well satisfied. */
+  strongMatches: string[];
+  /** Goals and constraints that could not be fully satisfied. */
+  weakSpots: string[];
+  /** Actionable improvements to the plan. */
+  suggestedImprovements: string[];
+}
+
+/** A suggested slot swap that would improve the plan. */
+export interface SuggestedSwap {
+  replaceRecipeId: string;
+  replaceTitle: string;
+  replacementRecipeId: string;
+  replacementTitle: string;
+  /** Why this swap would improve the plan. */
+  reasons: string[];
+  /** Score delta (positive = improvement). */
+  scoreDelta: number;
 }
 
 /** Final output of the deterministic weekly plan optimizer. */
@@ -231,6 +280,12 @@ export interface WeeklyPlanResult {
     title: string;
     reasons: string[];
   }>;
+  /** Coverage of the user's preferred ingredients across the plan. */
+  preferredIngredientCoverage?: PreferredIngredientCoverage;
+  /** Deterministic summary of how well the plan matches the request. */
+  requestFitSummary?: RequestFitSummary;
+  /** Targeted swap suggestions to improve the plan. */
+  suggestedSwaps?: SuggestedSwap[];
 }
 
 // ============================================================================

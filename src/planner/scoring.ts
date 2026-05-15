@@ -25,6 +25,93 @@ const TRANS_FAT_SIGNALS = [
   'hydrogenated soybean',
 ];
 
+// ============================================================================
+// Dinner-plan appropriateness signals
+// ============================================================================
+
+/**
+ * Title terms that strongly suggest a breakfast recipe.
+ * Checked against lowercased recipe title.
+ */
+const BREAKFAST_TITLE_TERMS = [
+  'french toast', 'pancake', 'waffle', 'oatmeal', 'granola',
+  'overnight oats', 'breakfast burrito', 'breakfast bowl', 'shakshuka',
+  'egg casserole', 'egg bake', 'frittata', 'quiche', 'breakfast sandwich',
+  'morning glory', 'coffee cake', 'smoothie bowl',
+  // Additional breakfast / morning terms
+  'muffin', 'scone', 'biscuit', 'hash brown', 'crepe', 'crumpet',
+  'bagel', 'egg bite', 'avocado toast', 'breakfast wrap', 'morning',
+  'acai bowl',
+];
+
+/**
+ * Title terms that strongly suggest a dessert or sweet snack.
+ */
+const DESSERT_TITLE_TERMS = [
+  'cake', ' pie', 'pie ', 'cobbler', 'tart', 'brownie', 'cookie', 'cookies',
+  'pudding', 'cheesecake', 'cupcake', 'ice cream', 'sorbet', 'fudge',
+  'chocolate mousse', 'tiramisu', 'panna cotta', 'creme brulee',
+  'bread pudding', 'churros',
+  // Additional dessert / sweet-snack terms
+  'donut', 'doughnut', 'macaron', 'macaroon', 'trifle', 'gelatin',
+  'popsicle', 'banana bread', 'sweet bread', 'candy', 'truffles',
+  'lemon bars', 'rice crispy', 'krispie treat',
+];
+
+/**
+ * Ingredient terms that identify high-quality vegetarian protein sources.
+ */
+const LEGUME_TERMS = [
+  'lentil', 'black bean', 'chickpea', 'garbanzo', 'kidney bean',
+  'pinto bean', 'edamame', 'tofu', 'tempeh', 'soy ', 'navy bean',
+  'cannellini', 'white bean', 'fava bean', 'mung bean', 'split pea',
+  'peanut', 'peanut butter',
+];
+
+const HIGH_PROTEIN_GRAIN_TERMS = ['quinoa', 'seitan', 'nutritional yeast'];
+
+/**
+ * Title terms that identify snack/appetizer recipes not suitable as dinner entrees.
+ * Supplementary to the meal_type='snack' check.
+ */
+const SNACK_TITLE_TERMS = [
+  'snack', 'appetizer', 'dip', 'chips', 'popcorn', 'nachos',
+  'bruschetta', 'crostini', 'bite', 'bites', 'slider', 'skewer',
+];
+
+/**
+ * Title/ingredient signals that strongly indicate a meal-prep-friendly dish.
+ * These recipes hold well, freeze well, and improve overnight.
+ */
+const MEAL_PREP_TITLE_SIGNALS = [
+  'chili', 'stew', 'curry', 'soup', 'casserole', 'meatball', 'meatballs',
+  'braised', 'slow cooker', 'crockpot', 'sheet pan', 'rice bowl', 'grain bowl',
+  'burrito bowl', 'meal prep', 'batch', 'make ahead', 'make-ahead',
+];
+
+/**
+ * Ingredients that make a recipe meal-prep friendly (cook in bulk, hold well).
+ */
+const MEAL_PREP_INGREDIENT_SIGNALS = [
+  'lentil', 'black bean', 'chickpea', 'kidney bean', 'white bean',
+  'brown rice', 'quinoa', 'farro', 'barley',
+];
+
+/**
+ * Signals for comfort-heavy / creamy pasta format.
+ * Used in scoring to detect when comfort mode is relevant.
+ */
+const COMFORT_HEAVY_INGREDIENT_SIGNALS = [
+  'heavy cream', 'cream cheese', 'cream sauce', 'alfredo', 'béchamel',
+  'bechamel', 'white sauce', 'four cheese', 'carbonara',
+];
+
+const COMFORT_HEAVY_TITLE_SIGNALS = [
+  'carbonara', 'alfredo', 'mac and cheese', 'macaroni and cheese',
+  'chicken parm', 'chicken parmesan', 'lasagna', 'ravioli',
+  'stroganoff', 'pot pie',
+];
+
 /** Canonical ingredient keys that indicate low perishability (pantry staples). */
 const CANONICAL_PANTRY = new Set([
   'olive oil', 'vegetable oil', 'canola oil', 'salt', 'black pepper',
@@ -127,6 +214,130 @@ export function getCanonicalIngredientKeys(norm: NormalizedRecipe): string[] {
 }
 
 // ============================================================================
+// Dinner-appropriateness detection
+// ============================================================================
+
+/**
+ * Returns a meal-plan-appropriateness penalty for recipes that clearly belong
+ * to breakfast, dessert, or snack categories rather than a dinner plan.
+ * Returns 0 for normal dinner entrees.
+ */
+function dinnerInappropriatenessPenalty(norm: NormalizedRecipe): number {
+  const titleLower = norm.title.toLowerCase();
+
+  // Check meal_type first (most reliable signal)
+  if (norm.meal_type === 'breakfast') return W.dinnerInappropriate.breakfast;
+  if (norm.meal_type === 'dessert') return W.dinnerInappropriate.dessert;
+  if (norm.meal_type === 'snack') return W.dinnerInappropriate.snack;
+
+  // Fall back to title-term detection
+  if (BREAKFAST_TITLE_TERMS.some((t) => titleLower.includes(t))) {
+    return W.dinnerInappropriate.breakfast;
+  }
+  if (DESSERT_TITLE_TERMS.some((t) => titleLower.includes(t))) {
+    return W.dinnerInappropriate.dessert;
+  }
+  if (SNACK_TITLE_TERMS.some((t) => titleLower.includes(t))) {
+    return W.dinnerInappropriate.snack;
+  }
+
+  return 0;
+}
+
+// ============================================================================
+// Vegetarian protein quality scoring
+// ============================================================================
+
+/**
+ * Score a vegetarian/vegan recipe by the quality of its protein source.
+ * Returns 0 for non-vegetarian/vegan recipes.
+ *
+ * - High: legumes (lentils, chickpeas, black beans, tofu, tempeh, etc.) or quinoa/seitan.
+ * - Medium: eggs as a primary protein source.
+ * - PastaOnly: pasta + cheese with no substantial plant protein — mild penalty.
+ */
+function scoreVegetarianProteinQuality(
+  norm: NormalizedRecipe,
+  sel: SelectionRecord
+): number {
+  if (!sel.is_vegetarian && !sel.is_vegan) return 0;
+
+  const ingText = norm.ingredients
+    .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
+    .join(' ');
+
+  const hasLegumes = LEGUME_TERMS.some((t) => ingText.includes(t));
+  const hasHighProteinGrain = HIGH_PROTEIN_GRAIN_TERMS.some((t) => ingText.includes(t));
+
+  if (hasLegumes || hasHighProteinGrain) return W.vegetarianProteinQuality.high;
+
+  // Egg-based: meaningful if eggs appear in the ingredients (not just as garnish)
+  const eggCount = norm.ingredients.filter(
+    (i) => /\b(egg|eggs)\b/.test(i.ingredient.toLowerCase())
+  ).length;
+  if (eggCount >= 1 && !sel.is_pasta) return W.vegetarianProteinQuality.medium;
+
+  // Pasta + cheese only (no substantial plant protein) — gentle penalty
+  if (sel.is_pasta) return W.vegetarianProteinQuality.pastaOnly;
+
+  return 0;
+}
+
+// ============================================================================
+// Meal-prep friendliness scoring
+// ============================================================================
+
+/**
+ * Returns a meal-prep score in [0, 1] based on title and ingredient signals.
+ * Dishes that batch well, freeze well, and improve overnight score highest.
+ * Returns 0 for recipes that clearly don't hold well (fresh salads, delicate fried items).
+ */
+function scoreMealPrepFriendliness(norm: NormalizedRecipe, sel: SelectionRecord): number {
+  const titleLower = norm.title.toLowerCase();
+  const ingText = norm.ingredients.map((i) => i.original.toLowerCase()).join(' ');
+
+  // Penalty signals: delicate / texture-sensitive recipes that don't hold well
+  const isDelicate =
+    /\b(salad|crispy|fried|tempura|sushi|ceviche|tartare|souffle)\b/.test(titleLower) ||
+    sel.freezer_friendly === 'no';
+
+  if (isDelicate) return 0;
+
+  let score = 0;
+
+  // Title signals for batch-cook dishes
+  if (MEAL_PREP_TITLE_SIGNALS.some((t) => titleLower.includes(t))) score += 0.6;
+
+  // Ingredient signals for bulk-cook staples
+  if (MEAL_PREP_INGREDIENT_SIGNALS.some((t) => ingText.includes(t))) score += 0.3;
+
+  // Confirmed freezer-friendly
+  if (sel.freezer_friendly === 'yes') score += 0.3;
+
+  return Math.min(score, 1.0);
+}
+
+// ============================================================================
+// Comfort-heavy detection
+// ============================================================================
+
+/**
+ * Returns true if the recipe is comfort-heavy (creamy pasta, cheese-loaded, etc.).
+ * Used to apply comfort mode bonuses/penalties appropriately.
+ */
+function isComfortHeavy(norm: NormalizedRecipe, sel: SelectionRecord): boolean {
+  if (!sel.is_comfort_food) return false;
+
+  const titleLower = norm.title.toLowerCase();
+  const ingText = norm.ingredients.map((i) => i.original.toLowerCase()).join(' ');
+
+  return (
+    COMFORT_HEAVY_TITLE_SIGNALS.some((t) => titleLower.includes(t)) ||
+    COMFORT_HEAVY_INGREDIENT_SIGNALS.some((t) => ingText.includes(t))
+  );
+}
+
+// ============================================================================
 // Trans-fat risk inference
 // ============================================================================
 
@@ -162,9 +373,29 @@ const W = {
   transFat: { low: 0.5, high: 0.0 },
   preferredIngredient: 0.25, // per match
   maxPreferredScore: 1.5,
-  pastaBonus: 0.3,
-  comfortFoodBonus: 0.3,
+  pastaBonus: 0.05, // Neutral: being pasta should not be a meaningful advantage
+  comfortFoodBonus: 0.05,    // 'allowed' mode: tiny signal only
+  comfortFoodPreferred: 0.4, // 'preferred' mode: meaningful bonus
+  comfortFoodRequired: 0.8,  // 'required' mode: treat like a slot requirement
+  comfortFoodAvoid: -0.3,    // 'avoid' mode: mild penalty for comfort-heavy recipes
   cuisineBonus: 0.1,
+  /**
+   * Penalty for recipes that are clearly breakfast, dessert, or snack items
+   * in a dinner-plan context. Applied based on meal_type and title signals.
+   * Significantly increased to ensure these never appear as top alternatives.
+   */
+  dinnerInappropriate: { breakfast: -2.5, dessert: -2.5, snack: -1.5 },
+  /**
+   * Bonus/penalty for vegetarian/vegan recipes based on protein quality.
+   * High: legumes, tofu, tempeh, quinoa, seitan.
+   * Medium: egg-based (when eggs are a meaningful protein source).
+   * PastaOnly: pasta + cheese is the only "protein" — meaningful penalty.
+   */
+  vegetarianProteinQuality: { high: 0.6, medium: 0.3, pastaOnly: -0.9 },
+  /** Small bonus for recipes with complete real macro data in the catalog. */
+  nutritionCompleteness: 0.2,
+  /** Bonus for meal-prep-friendly recipes when freezer/weight-loss goals are active. */
+  mealPrep: 0.4,
 };
 
 // ============================================================================
@@ -370,8 +601,10 @@ export function scoreRecipeForRequest(
   // ---------- High protein ----------
   if (request.goals.highProtein) {
     if (em.macro_pct_protein !== null) {
-      // Scale: 35% protein → score 1.0
-      const hpScore = Math.min(em.macro_pct_protein / 35, 1.0) * W.highProtein;
+      // Scale: ≥35% protein → 1.0; below 15% → negative penalty (implausible / very low protein)
+      const rawHpScore = em.macro_pct_protein / 35;
+      const lowProteinPenalty = em.macro_pct_protein < 15 ? (15 - em.macro_pct_protein) / 30 : 0;
+      const hpScore = Math.max(-1.0, Math.min(1.0, rawHpScore - lowProteinPenalty)) * W.highProtein;
       breakdown.highProtein = hpScore;
       score += hpScore;
     } else {
@@ -382,8 +615,9 @@ export function scoreRecipeForRequest(
   // ---------- Low fat ----------
   if (request.goals.lowFat) {
     if (em.macro_pct_fat !== null) {
-      // Scale: 15% fat → 1.0, 45% fat → 0.0
-      const lfScore = Math.max(0, 1.0 - (em.macro_pct_fat - 15) / 30) * W.lowFat;
+      // Scale: 15% fat → 1.0, 45% fat → 0.0, beyond 45% → negative penalty up to -1.0
+      const rawLfScore = 1.0 - (em.macro_pct_fat - 15) / 30;
+      const lfScore = Math.max(-1.0, rawLfScore) * W.lowFat;
       breakdown.lowFat = lfScore;
       score += lfScore;
     } else {
@@ -477,15 +711,71 @@ export function scoreRecipeForRequest(
   }
 
   // ---------- Comfort food ----------
-  if (request.allowComfortFood && sel.is_comfort_food) {
-    breakdown.comfortFood = W.comfortFoodBonus;
-    score += W.comfortFoodBonus;
+  // Apply scoring based on comfortFoodMode (preferred / required / allowed / avoid).
+  // Fall back to the legacy allowComfortFood boolean when mode is not set.
+  {
+    const mode = request.comfortFoodMode;
+    const comfortHeavy = isComfortHeavy(norm, sel);
+    if (mode === 'preferred' && sel.is_comfort_food) {
+      breakdown.comfortFood = W.comfortFoodPreferred;
+      score += W.comfortFoodPreferred;
+    } else if (mode === 'required' && sel.is_comfort_food) {
+      breakdown.comfortFood = W.comfortFoodRequired;
+      score += W.comfortFoodRequired;
+    } else if (mode === 'avoid' && comfortHeavy) {
+      breakdown.comfortFood = W.comfortFoodAvoid;
+      score += W.comfortFoodAvoid;
+    } else if ((!mode || mode === 'allowed') && request.allowComfortFood && sel.is_comfort_food) {
+      // Legacy / 'allowed' mode: tiny signal so comfort food is not totally invisible
+      breakdown.comfortFood = W.comfortFoodBonus;
+      score += W.comfortFoodBonus;
+    }
   }
 
   // ---------- Has cuisine label (variety signal) ----------
   if (norm.cuisine) {
     breakdown.hasCuisine = W.cuisineBonus;
     score += W.cuisineBonus;
+  }
+
+  // ---------- Dinner-plan appropriateness ----------
+  // Penalize breakfast / dessert / snack recipes in a dinner-plan context.
+  const dinnerPenalty = dinnerInappropriatenessPenalty(norm);
+  if (dinnerPenalty !== 0) {
+    breakdown.dinnerAppropriateness = dinnerPenalty;
+    score += dinnerPenalty;
+  }
+
+  // ---------- Vegetarian protein quality ----------
+  // Reward legume/tofu-based vegetarian recipes; meaningfully penalize pasta-only veg.
+  const vegProteinScore = scoreVegetarianProteinQuality(norm, sel);
+  if (vegProteinScore !== 0) {
+    breakdown.vegetarianProteinQuality = vegProteinScore;
+    score += vegProteinScore;
+  }
+
+  // ---------- Meal-prep friendliness ----------
+  // Bonus when freezer-friendly or weight-loss goals are active and the recipe
+  // batches/holds well. Helps surface stews, chilis, curries, grain bowls over
+  // delicate recipes that don't reheat well.
+  if (request.goals.freezerFriendly || request.goals.weightLoss || request.goals.highProtein) {
+    const mpScore = scoreMealPrepFriendliness(norm, sel);
+    if (mpScore > 0) {
+      breakdown.mealPrep = mpScore * W.mealPrep;
+      score += breakdown.mealPrep;
+    }
+  }
+
+  // ---------- Nutrition completeness bonus ----------
+  // Small bonus when complete real macro data is available from the catalog.
+  // This avoids over-relying on enrichment estimates when catalog data exists.
+  if (
+    sel.macro_pct_protein !== null &&
+    sel.macro_pct_carbs !== null &&
+    sel.macro_pct_fat !== null
+  ) {
+    breakdown.nutritionCompleteness = W.nutritionCompleteness;
+    score += W.nutritionCompleteness;
   }
 
   return {

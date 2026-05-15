@@ -57,6 +57,7 @@ const WeeklyPlanRequestSchema = z.object({
   requiredSourceSignals: z.array(z.string()).nullable().optional(),
   requiredTagsOrTitleTerms: z.array(z.string()).nullable().optional(),
   allowComfortFood: z.boolean().nullable().optional().transform((v) => v ?? false),
+  comfortFoodMode: z.enum(['allowed', 'preferred', 'required', 'avoid']).nullable().optional(),
   maxResults: z.number().int().min(1).nullable().optional(),
 });
 
@@ -96,6 +97,7 @@ JSON schema:
   "requiredSourceSignals": string[]|null  (e.g. ["hellofresh"] if ≥1 HelloFresh recipe required),
   "requiredTagsOrTitleTerms": string[]|null (e.g. ["pasta"] if ≥1 pasta recipe required; use "cuisine:mexican" if ≥1 Mexican recipe required),
   "allowComfortFood": boolean,
+  "comfortFoodMode": "allowed"|"preferred"|"required"|"avoid"|null  (null = not specified; "allowed" = ok but not prioritised; "preferred" = give bonus; "required" = at least one; "avoid" = mild penalty),
   "maxResults": number|null
 }
 
@@ -111,7 +113,11 @@ Other rules:
 - "1 mexican" / "one mexican recipe" / "a mexican meal" → requiredTagsOrTitleTerms: ["cuisine:mexican"]
 - "1 italian" → requiredTagsOrTitleTerms: ["cuisine:italian"] (and so on for other cuisines)
 - Cuisine terms go in requiredTagsOrTitleTerms as "cuisine:<name>"; they do NOT become protein slots
-- "comfort food" → allowComfortFood: true
+- "comfort food" → allowComfortFood: true, comfortFoodMode: "allowed"
+- "one of the meals can be a comfort food" → allowComfortFood: true, comfortFoodMode: "allowed"
+- "I want comfort food" / "comfort food night" / "I love comfort food" → allowComfortFood: true, comfortFoodMode: "preferred"
+- "make sure one meal is a comfort food" → allowComfortFood: true, comfortFoodMode: "required"
+- "no comfort food" / "avoid comfort food" / "healthy, not comfort food" → allowComfortFood: false, comfortFoodMode: "avoid"
 - "freeze and reheat" / "meal prep" → goals.freezerFriendly: true
 - "low waste" / "ingredient overlap" → goals.lowWaste: true
 - "monounsaturated fats" / "omega-3" → goals.healthyFats: true
@@ -341,6 +347,16 @@ export function parsePlanRequestOffline(query: string): WeeklyPlanRequest {
 
   // --- Comfort food ---
   const allowComfortFood = /comfort\s+food/i.test(q);
+  let comfortFoodMode: WeeklyPlanRequest['comfortFoodMode'];
+  if (/no\s+comfort\s+food|avoid\s+comfort\s+food|not\s+comfort\s+food/i.test(q)) {
+    comfortFoodMode = 'avoid';
+  } else if (/\bone\s+(?:of\s+the\s+)?meals?\s+(?:can|could)\s+be\s+(?:a\s+)?comfort/i.test(q)) {
+    comfortFoodMode = 'allowed';
+  } else if (/\bi\s+(?:want|love|need)\s+comfort\s+food|\bcomfort\s+food\s+night\b|\bcomfort\s+food\s+week\b/i.test(q)) {
+    comfortFoodMode = 'preferred';
+  } else if (/\bcomfort\s+food\b/i.test(q)) {
+    comfortFoodMode = 'allowed';
+  }
 
   const request: WeeklyPlanRequest = {
     mealCount,
@@ -353,6 +369,7 @@ export function parsePlanRequestOffline(query: string): WeeklyPlanRequest {
     ...(requiredSourceSignals.length > 0 ? { requiredSourceSignals } : {}),
     ...(requiredTagsOrTitleTerms.length > 0 ? { requiredTagsOrTitleTerms } : {}),
     allowComfortFood,
+    ...(comfortFoodMode !== undefined ? { comfortFoodMode } : {}),
   };
 
   return normalizeRequest(request);

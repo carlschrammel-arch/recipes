@@ -165,8 +165,24 @@ export function getCandidatesForPlan(
       candidates.push({ sel, norm });
     }
 
-    // Truncate (caller will score and pick top-N anyway, but keep a hard cap)
-    const truncated = candidates.slice(0, maxPerSlot);
+    // Truncate (caller will score and pick top-N anyway, but keep a hard cap).
+    // Required-source recipes (e.g. HelloFresh) are pinned to the front so they
+    // survive truncation and remain available for singleton enforcement.
+    const requiredSources = request.requiredSourceSignals ?? [];
+    let truncated: PlannerRecipe[];
+    if (requiredSources.length > 0) {
+      const isRequiredSource = (sel: SelectionRecord) =>
+        requiredSources.some(
+          (s) =>
+            sel.source_normalized.toLowerCase().includes(s) ||
+            (sel.is_hellofresh && s === 'hellofresh')
+        );
+      const pinned = candidates.filter((r) => isRequiredSource(r.sel));
+      const rest = candidates.filter((r) => !isRequiredSource(r.sel));
+      truncated = [...pinned, ...rest].slice(0, maxPerSlot);
+    } else {
+      truncated = candidates.slice(0, maxPerSlot);
+    }
 
     candidatesBySlot.set(slot, truncated);
     counts[slot] = truncated.length;
@@ -174,15 +190,32 @@ export function getCandidatesForPlan(
     if (truncated.length === 0) emptySlots.push(slot);
   }
 
-  // ---- Build flex pool (all recipes, ordered by a simple heuristic) ----
+  // ---- Build flex pool (all recipes, sorted by a dinner-suitability heuristic) ----
+  // Flex candidates are scored by the optimizer; we pre-sort here so that when
+  // the pool is large, the optimizer's top-N after scoring starts from the best candidates.
   if (needsFlexPool) {
     const flexCandidates: PlannerRecipe[] = [];
     for (const sel of selectionRecords) {
       const norm = normalizedById.get(sel.id);
       if (!norm) continue;
+      // Exclude obvious non-dinner items from the flex pool via meal_type
+      if (
+        (norm as { meal_type?: string }).meal_type === 'breakfast' ||
+        (norm as { meal_type?: string }).meal_type === 'dessert' ||
+        (norm as { meal_type?: string }).meal_type === 'snack'
+      ) continue;
       flexCandidates.push({ sel, norm });
     }
-    const truncatedFlex = flexCandidates.slice(0, maxPerSlot);
+    // Pre-sort by weeknight + kid-friendly heuristic so high-quality candidates
+    // bubble to the top before scoring and truncation
+    flexCandidates.sort(
+      (a, b) =>
+        (b.sel.weeknight_score * 0.6 + b.sel.kid_friendly_score * 0.4) -
+        (a.sel.weeknight_score * 0.6 + a.sel.kid_friendly_score * 0.4)
+    );
+    // Allow a larger flex pool (up to 2× per-slot cap) so the optimizer has more
+    // variety candidates to choose from, especially for diversity enforcement
+    const truncatedFlex = flexCandidates.slice(0, maxPerSlot * 2);
     candidatesBySlot.set('flex', truncatedFlex);
     counts['flex'] = truncatedFlex.length;
   }

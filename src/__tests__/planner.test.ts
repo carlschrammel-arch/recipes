@@ -1383,3 +1383,490 @@ describe('renderer — enrichment summary', () => {
     expect(md).toContain('no OpenAI API key');
   });
 });
+
+// ============================================================================
+// New feature tests: vegetarian protein quality, dinner appropriateness,
+// preferred ingredient coverage, request fit summary, flex variety
+// ============================================================================
+
+describe('scoreRecipeForRequest — dinner appropriateness penalty', () => {
+  const baseRequest: WeeklyPlanRequest = {
+    mealCount: 1,
+    requiredProteinSlots: ['chicken'],
+    flexMealCount: 0,
+    macroTargets: null,
+    minKidFriendlyMeals: null,
+    maxTotalTimeMinutes: null,
+    preferredIngredients: [],
+    avoidIngredients: [],
+    requiredSourceSignals: [],
+    requiredTagsOrTitleTerms: [],
+    rawQuery: 'chicken dinner',
+    goals: {},
+  };
+
+  it('penalizes recipes with breakfast meal_type', () => {
+    const breakfastNorm = makeNorm({
+      id: 'breakfast01111111',
+      title: 'Scrambled Eggs',
+      primary_protein: 'chicken',
+      meal_type: 'breakfast',
+    });
+    const breakfastSel = makeSel({
+      id: 'breakfast01111111',
+      title: 'Scrambled Eggs',
+      primary_protein: 'chicken',
+    });
+    const dinnerSel = makeSel({
+      id: 'aaaa0000000000aa',
+      title: 'Lemon Herb Chicken',
+      primary_protein: 'chicken',
+    });
+    const plannerBreakfast: PlannerRecipe = { norm: breakfastNorm, sel: breakfastSel };
+    const plannerDinner: PlannerRecipe = { norm: CHICKEN_NORM, sel: dinnerSel };
+
+    const breakfastScore = scoreRecipeForRequest(plannerBreakfast, baseRequest);
+    const dinnerScore = scoreRecipeForRequest(plannerDinner, baseRequest);
+
+    // Breakfast recipe should score lower due to dinner-inappropriateness penalty
+    expect(breakfastScore.score).toBeLessThan(dinnerScore.score);
+  });
+
+  it('does not apply inappropriateness penalty for dinner recipe', () => {
+    const dinnerSel = makeSel({
+      id: 'aaaa0000000000aa',
+      title: 'Lemon Herb Chicken',
+      primary_protein: 'chicken',
+    });
+    const dinnerRecipe: PlannerRecipe = { norm: CHICKEN_NORM, sel: dinnerSel };
+    const score = scoreRecipeForRequest(dinnerRecipe, baseRequest);
+    // dinner recipes should have no negative contribution from dinner-appropriateness
+    // (the breakdown key may be absent when the delta is zero, which is fine)
+    const dinnerAppropriateness = score.scoreBreakdown.dinnerAppropriateness ?? 0;
+    expect(dinnerAppropriateness).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('scoreRecipeForRequest — vegetarian protein quality', () => {
+  const vegetarianRequest: WeeklyPlanRequest = {
+    mealCount: 1,
+    requiredProteinSlots: ['vegetarian'],
+    flexMealCount: 0,
+    macroTargets: null,
+    minKidFriendlyMeals: null,
+    maxTotalTimeMinutes: null,
+    preferredIngredients: [],
+    avoidIngredients: [],
+    requiredSourceSignals: [],
+    requiredTagsOrTitleTerms: [],
+    rawQuery: 'vegetarian dinner',
+    goals: {},
+  };
+
+  it('scores tofu/tempeh vegetarian recipe higher than pasta-only', () => {
+    const tofuNorm = makeNorm({
+      id: 'tofu000000000001',
+      title: 'Tofu Stir Fry',
+      primary_protein: 'legumes',
+      ingredients: [
+        { original: '14 oz firm tofu', quantity: 14, unit: 'oz', ingredient: 'tofu', notes: null },
+        { original: '2 tbsp soy sauce', quantity: 2, unit: 'tbsp', ingredient: 'soy sauce', notes: null },
+        { original: '1 cup broccoli', quantity: 1, unit: 'cup', ingredient: 'broccoli', notes: null },
+      ],
+    });
+    const tofuSel = makeSel({
+      id: 'tofu000000000001',
+      title: 'Tofu Stir Fry',
+      primary_protein: 'legumes',
+      is_vegetarian: true,
+      is_pasta: false,
+    });
+
+    const pastaOnlyNorm = makeNorm({
+      id: 'pasta00000000001',
+      title: 'Penne Arrabbiata',
+      primary_protein: 'other',
+      ingredients: [
+        { original: '12 oz penne pasta', quantity: 12, unit: 'oz', ingredient: 'pasta', notes: null },
+        { original: '1 can crushed tomatoes', quantity: 1, unit: 'can', ingredient: 'crushed tomatoes', notes: null },
+      ],
+    });
+    const pastaOnlySel = makeSel({
+      id: 'pasta00000000001',
+      title: 'Penne Arrabbiata',
+      primary_protein: 'other',
+      is_vegetarian: true,
+      is_pasta: true,
+    });
+
+    const tofuRecipe: PlannerRecipe = { norm: tofuNorm, sel: tofuSel };
+    const pastaRecipe: PlannerRecipe = { norm: pastaOnlyNorm, sel: pastaOnlySel };
+
+    const tofuScore = scoreRecipeForRequest(tofuRecipe, vegetarianRequest);
+    const pastaScore = scoreRecipeForRequest(pastaRecipe, vegetarianRequest);
+
+    expect(tofuScore.score).toBeGreaterThan(pastaScore.score);
+  });
+});
+
+describe('buildWeeklyPlan — preferred ingredient coverage', () => {
+  it('populates preferredIngredientCoverage when ingredients are requested', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 1,
+      requiredProteinSlots: ['chicken'],
+      flexMealCount: 0,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: ['olive oil', 'garlic', 'unicorn-dust'],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: 'chicken with olive oil',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+
+    expect(result.preferredIngredientCoverage).toBeDefined();
+    // Chicken norm has olive oil and garlic — should be matched
+    expect(result.preferredIngredientCoverage!.matched).toContain('olive oil');
+    expect(result.preferredIngredientCoverage!.matched).toContain('garlic');
+    // unicorn-dust doesn't exist in any recipe
+    expect(result.preferredIngredientCoverage!.missing).toContain('unicorn-dust');
+    // Coverage should be partial (2 of 3)
+    expect(result.preferredIngredientCoverage!.coverageScore).toBeGreaterThan(0);
+    expect(result.preferredIngredientCoverage!.coverageScore).toBeLessThan(1);
+  });
+
+  it('does not populate preferredIngredientCoverage when no preferred ingredients', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 1,
+      requiredProteinSlots: ['chicken'],
+      flexMealCount: 0,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: [],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: 'chicken',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+    expect(result.preferredIngredientCoverage).toBeUndefined();
+  });
+});
+
+describe('buildWeeklyPlan — requestFitSummary', () => {
+  it('always returns a requestFitSummary with a valid overallFitLabel', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 2,
+      requiredProteinSlots: ['chicken', 'beef'],
+      flexMealCount: 0,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: [],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: 'chicken and beef',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+
+    expect(result.requestFitSummary).toBeDefined();
+    expect(['excellent', 'good', 'fair', 'weak']).toContain(result.requestFitSummary!.overallFitLabel);
+    expect(Array.isArray(result.requestFitSummary!.strongMatches)).toBe(true);
+    expect(Array.isArray(result.requestFitSummary!.weakSpots)).toBe(true);
+    expect(Array.isArray(result.requestFitSummary!.suggestedImprovements)).toBe(true);
+  });
+});
+
+describe('buildWeeklyPlan — flex variety with multiple flex slots', () => {
+  it('assigns unique recipes to each flex slot', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 3,
+      requiredProteinSlots: ['chicken'],
+      flexMealCount: 2,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: [],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: 'chicken plus 2 flex',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+
+    expect(result.selectedRecipes).toHaveLength(3);
+    const ids = result.selectedRecipes.map((r) => r.id);
+    // All three recipes should be distinct (no duplicate IDs)
+    expect(new Set(ids).size).toBe(3);
+  });
+
+  it('uses unique flex slot keys in the plan (no overwrites)', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 4,
+      requiredProteinSlots: ['chicken'],
+      flexMealCount: 3,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: [],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: '1 chicken 3 flex',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+
+    // With 6 total recipes in the fixture and requesting 4, we should get up to 4 unique recipes
+    expect(result.selectedRecipes.length).toBeGreaterThan(1);
+    const ids = result.selectedRecipes.map((r) => r.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe('renderer — request fit summary rendered', () => {
+  it('includes fit summary in markdown output when present', () => {
+    const request: WeeklyPlanRequest = {
+      mealCount: 1,
+      requiredProteinSlots: ['chicken'],
+      flexMealCount: 0,
+      macroTargets: null,
+      minKidFriendlyMeals: null,
+      maxTotalTimeMinutes: null,
+      preferredIngredients: [],
+      avoidIngredients: [],
+      requiredSourceSignals: [],
+      requiredTagsOrTitleTerms: [],
+      rawQuery: 'chicken dinner',
+      goals: {},
+    };
+
+    const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, request, 75);
+    const md = renderPlanAsMarkdown(result);
+
+    expect(md).toContain('Plan Fit Summary');
+    // Should have a fit label (case-insensitive)
+    expect(md).toMatch(/excellent|good|fair|weak/i);
+  });
+});
+
+// ============================================================================
+// scoreRecipeForRequest — dinner appropriateness: snack/muffin terms
+// ============================================================================
+
+describe('scoreRecipeForRequest — snack title penalty', () => {
+  const baseRequest: WeeklyPlanRequest = {
+    mealCount: 1,
+    requiredProteinSlots: ['chicken'],
+    flexMealCount: 0,
+    macroTargets: null,
+    minKidFriendlyMeals: null,
+    maxTotalTimeMinutes: null,
+    preferredIngredients: [],
+    avoidIngredients: [],
+    requiredSourceSignals: [],
+    requiredTagsOrTitleTerms: [],
+    rawQuery: 'chicken dinner',
+    goals: {},
+  };
+
+  it('penalizes "muffin bites" title (BREAKFAST_TITLE_TERMS + SNACK_TITLE_TERMS)', () => {
+    const muffinNorm = makeNorm({
+      id: 'muffin0000000001',
+      title: 'Sausage Blueberry Muffin Bites',
+      primary_protein: 'chicken',
+    });
+    const muffinSel = makeSel({
+      id: 'muffin0000000001',
+      title: 'Sausage Blueberry Muffin Bites',
+      primary_protein: 'chicken',
+    });
+    const dinnerSel = makeSel({ id: 'dinner0000000001', title: 'Lemon Herb Chicken', primary_protein: 'chicken' });
+
+    const muffinScore = scoreRecipeForRequest({ norm: muffinNorm, sel: muffinSel }, baseRequest);
+    const dinnerScore = scoreRecipeForRequest({ norm: CHICKEN_NORM, sel: dinnerSel }, baseRequest);
+
+    // Muffin bites should be at least 2.0 points lower due to snack + breakfast overlap
+    expect(muffinScore.score).toBeLessThan(dinnerScore.score - 2.0);
+    // Breakdown should record the penalty
+    expect(muffinScore.scoreBreakdown.dinnerAppropriateness).toBeDefined();
+    expect(muffinScore.scoreBreakdown.dinnerAppropriateness!).toBeLessThan(0);
+  });
+
+  it('penalizes "appetizer bites" title (SNACK_TITLE_TERMS)', () => {
+    const snackNorm = makeNorm({
+      id: 'snack00000000001',
+      title: 'Chicken Nacho Bites',
+      primary_protein: 'chicken',
+    });
+    const snackSel = makeSel({
+      id: 'snack00000000001',
+      title: 'Chicken Nacho Bites',
+      primary_protein: 'chicken',
+    });
+    const dinnerSel = makeSel({ id: 'dinner0000000002', title: 'Herb Roasted Chicken', primary_protein: 'chicken' });
+
+    const snackScore = scoreRecipeForRequest({ norm: snackNorm, sel: snackSel }, baseRequest);
+    const dinnerScore = scoreRecipeForRequest({ norm: CHICKEN_NORM, sel: dinnerSel }, baseRequest);
+
+    expect(snackScore.score).toBeLessThan(dinnerScore.score - 1.0);
+  });
+});
+
+// ============================================================================
+// scoreRecipeForRequest — meal-prep scoring boost
+// ============================================================================
+
+describe('scoreRecipeForRequest — meal-prep boost', () => {
+  const freezerRequest: WeeklyPlanRequest = {
+    mealCount: 1,
+    requiredProteinSlots: ['chicken'],
+    flexMealCount: 0,
+    macroTargets: null,
+    minKidFriendlyMeals: null,
+    maxTotalTimeMinutes: null,
+    preferredIngredients: [],
+    avoidIngredients: [],
+    requiredSourceSignals: [],
+    requiredTagsOrTitleTerms: [],
+    rawQuery: 'freezer friendly chicken',
+    goals: { freezerFriendly: true },
+  };
+
+  it('boosts stew/chili title when freezerFriendly goal is active', () => {
+    const stewNorm = makeNorm({
+      id: 'stew000000000001',
+      title: 'Chicken Chili',
+      primary_protein: 'chicken',
+    });
+    const stewSel = makeSel({
+      id: 'stew000000000001',
+      title: 'Chicken Chili',
+      primary_protein: 'chicken',
+      freezer_friendly: 'yes',
+    });
+    const plainSel = makeSel({ id: 'plain00000000001', title: 'Grilled Chicken Breast', primary_protein: 'chicken' });
+
+    const stewScore = scoreRecipeForRequest({ norm: stewNorm, sel: stewSel }, freezerRequest);
+    const plainScore = scoreRecipeForRequest({ norm: CHICKEN_NORM, sel: plainSel }, freezerRequest);
+
+    expect(stewScore.scoreBreakdown.mealPrep).toBeDefined();
+    expect(stewScore.scoreBreakdown.mealPrep!).toBeGreaterThan(0);
+    // Stew should outscore a plain recipe due to meal-prep boost
+    expect(stewScore.score).toBeGreaterThan(plainScore.score);
+  });
+
+  it('does not boost when no relevant goal is active', () => {
+    const noGoalRequest: WeeklyPlanRequest = { ...freezerRequest, goals: {} };
+    const stewNorm = makeNorm({
+      id: 'stew000000000002',
+      title: 'Beef Stew',
+      primary_protein: 'chicken',
+    });
+    const stewSel = makeSel({
+      id: 'stew000000000002',
+      title: 'Beef Stew',
+      primary_protein: 'chicken',
+      freezer_friendly: 'yes',
+    });
+
+    const stewScore = scoreRecipeForRequest({ norm: stewNorm, sel: stewSel }, noGoalRequest);
+    expect(stewScore.scoreBreakdown.mealPrep).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// scoreRecipeForRequest — comfortFoodMode
+// ============================================================================
+
+describe('scoreRecipeForRequest — comfortFoodMode', () => {
+  const comfortNorm = makeNorm({
+    id: 'comfort000000001',
+    title: 'Mac and Cheese',
+    primary_protein: 'chicken',
+  });
+  const comfortSel = makeSel({
+    id: 'comfort000000001',
+    title: 'Mac and Cheese',
+    primary_protein: 'chicken',
+    is_comfort_food: true,
+    is_pasta: true,
+  });
+  const comfortRecipe: PlannerRecipe = { norm: comfortNorm, sel: comfortSel };
+
+  const makeComfortRequest = (mode?: WeeklyPlanRequest['comfortFoodMode'], allowComfortFood = true): WeeklyPlanRequest => ({
+    mealCount: 1,
+    requiredProteinSlots: ['chicken'],
+    flexMealCount: 0,
+    macroTargets: null,
+    minKidFriendlyMeals: null,
+    maxTotalTimeMinutes: null,
+    preferredIngredients: [],
+    avoidIngredients: [],
+    requiredSourceSignals: [],
+    requiredTagsOrTitleTerms: [],
+    rawQuery: 'comfort food',
+    allowComfortFood,
+    comfortFoodMode: mode,
+    goals: {},
+  });
+
+  it('gives largest bonus for "required" mode', () => {
+    const preferred = scoreRecipeForRequest(comfortRecipe, makeComfortRequest('preferred'));
+    const required = scoreRecipeForRequest(comfortRecipe, makeComfortRequest('required'));
+    expect(required.scoreBreakdown.comfortFood!).toBeGreaterThan(preferred.scoreBreakdown.comfortFood!);
+  });
+
+  it('gives mid bonus for "preferred" mode vs "allowed"', () => {
+    const allowed = scoreRecipeForRequest(comfortRecipe, makeComfortRequest('allowed'));
+    const preferred = scoreRecipeForRequest(comfortRecipe, makeComfortRequest('preferred'));
+    expect(preferred.scoreBreakdown.comfortFood!).toBeGreaterThan(allowed.scoreBreakdown.comfortFood!);
+  });
+
+  it('penalizes comfort food under "avoid" mode', () => {
+    const avoidScore = scoreRecipeForRequest(comfortRecipe, makeComfortRequest('avoid', false));
+    expect(avoidScore.scoreBreakdown.comfortFood).toBeDefined();
+    expect(avoidScore.scoreBreakdown.comfortFood!).toBeLessThan(0);
+  });
+});
+
+// ============================================================================
+// query-parser — comfortFoodMode parsing
+// ============================================================================
+
+describe('parsePlanRequestOffline — comfortFoodMode', () => {
+  it('parses "I want comfort food" as comfortFoodMode preferred', () => {
+    const req = parsePlanRequestOffline('I want comfort food for dinner, 3 chicken meals');
+    expect(req.comfortFoodMode).toBe('preferred');
+    expect(req.allowComfortFood).toBe(true);
+  });
+
+  it('parses "no comfort food" as comfortFoodMode avoid', () => {
+    const req = parsePlanRequestOffline('no comfort food, 3 chicken meals');
+    expect(req.comfortFoodMode).toBe('avoid');
+  });
+
+  it('parses "comfort food" alone as comfortFoodMode allowed', () => {
+    const req = parsePlanRequestOffline('a week with comfort food, 3 chicken meals');
+    expect(req.comfortFoodMode).toBe('allowed');
+    expect(req.allowComfortFood).toBe(true);
+  });
+
+  it('leaves comfortFoodMode undefined when not mentioned', () => {
+    const req = parsePlanRequestOffline('3 chicken meals for the week');
+    expect(req.comfortFoodMode).toBeUndefined();
+  });
+});
