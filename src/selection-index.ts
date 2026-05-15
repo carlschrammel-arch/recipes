@@ -445,7 +445,22 @@ export function calculateMacros(recipe: NormalizedRecipe): MacroResult {
   const protein = nutrition.protein_g;
   const carbs = nutrition.carbs_g;
   const fat = nutrition.fat_g;
-  
+
+  // Plausibility check: some sources (e.g. Home Chef) store per-100g density values
+  // or whole-recipe totals rather than per-serving grams. These produce wildly
+  // inflated carb/fat counts. Reject the macro data if any value is implausible
+  // so we don't compute misleading macro_pct percentages.
+  if (protein > 150 || carbs > 200 || fat > 120) {
+    return {
+      macros_incomplete: true,
+      kcal_est: nutrition.calories ?? null,
+      macro_pct_protein: null,
+      macro_pct_carbs: null,
+      macro_pct_fat: null,
+      macro_target_ok: null,
+    };
+  }
+
   // Calculate estimated calories: protein*4 + carbs*4 + fat*9
   const kcal_est = Math.round(protein * 4 + carbs * 4 + fat * 9);
   

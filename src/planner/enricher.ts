@@ -145,7 +145,16 @@ export function computeRecipeHash(recipe: NormalizedRecipe): string {
  */
 export function getMissingPlanningFields(recipe: NormalizedRecipe): string[] {
   const missing: string[] = [];
-  if (!recipe.nutrition || recipe.nutrition.calories === null) missing.push('nutrition');
+  if (!recipe.nutrition || recipe.nutrition.calories === null) {
+    missing.push('nutrition');
+  } else {
+    // Has calories but may be missing the macro breakdown needed for scoring.
+    // Sources like HelloFresh often publish calorie counts without protein/carbs/fat.
+    const n = recipe.nutrition;
+    if (n.protein_g === null || n.carbs_g === null || n.fat_g === null) {
+      missing.push('nutrition_macros');
+    }
+  }
   // kid_friendly_score defaults to 0 but we treat 0 as "not computed" for recipes
   // that have no kid-friendly signals. We only enrich if it's exactly 0 AND the recipe
   // has no tags or title signals that would have set it.
@@ -388,7 +397,8 @@ export function applyEnrichmentForSoftScoring(
   const m = record.metadata;
   const enriched: NormalizedRecipe = { ...recipe };
 
-  // Only fill in missing nutrition — never overwrite existing values
+  // Only fill in missing nutrition — never overwrite existing values.
+  // Case 1: No nutrition at all (or calories missing) — fill everything.
   if (!enriched.nutrition || enriched.nutrition.calories === null) {
     if (
       m.estimated_calories != null ||
@@ -403,14 +413,33 @@ export function applyEnrichmentForSoftScoring(
         fat_g: m.estimated_fat_g ?? enriched.nutrition?.fat_g ?? null,
         sodium_mg: enriched.nutrition?.sodium_mg ?? null,
       };
-      // Apply plausibility bounds to the merged result — catches both implausible
-      // AI estimates (already filtered in loadEnrichmentCache) and implausible
-      // source data (e.g., whole-recipe macros instead of per-serving).
-      const n = enriched.nutrition;
-      if (n.protein_g != null && n.protein_g > 150) n.protein_g = null;
-      if (n.carbs_g != null && n.carbs_g > 200) n.carbs_g = null;
-      if (n.fat_g != null && n.fat_g > 120) n.fat_g = null;
     }
+  } else if (
+    enriched.nutrition &&
+    (enriched.nutrition.protein_g === null ||
+     enriched.nutrition.carbs_g === null ||
+     enriched.nutrition.fat_g === null)
+  ) {
+    // Case 2: Has calories but missing macro breakdown — fill only the missing macros.
+    // This is common for sources (e.g. HelloFresh) that publish calorie counts but not
+    // individual macro grams. Enrichment estimates fill the gap so these recipes can
+    // be scored on the same macro criteria as sources with full nutritional data.
+    enriched.nutrition = {
+      ...enriched.nutrition,
+      protein_g: enriched.nutrition.protein_g ?? m.estimated_protein_g ?? null,
+      carbs_g:   enriched.nutrition.carbs_g   ?? m.estimated_carbs_g   ?? null,
+      fat_g:     enriched.nutrition.fat_g     ?? m.estimated_fat_g     ?? null,
+    };
+  }
+
+  // Apply plausibility bounds to the merged result — catches both implausible
+  // AI estimates (already filtered in loadEnrichmentCache) and implausible
+  // source data (e.g., whole-recipe macros instead of per-serving).
+  if (enriched.nutrition) {
+    const n = enriched.nutrition;
+    if (n.protein_g != null && n.protein_g > 150) n.protein_g = null;
+    if (n.carbs_g != null && n.carbs_g > 200) n.carbs_g = null;
+    if (n.fat_g != null && n.fat_g > 120) n.fat_g = null;
   }
 
   // Only update kid_friendly_score if it was 0 (unset)

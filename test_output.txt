@@ -1,0 +1,249 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.6 [39m[90m/Users/carlschrammel/Code/recipes[39m
+
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould not flag unique recipes as duplicates[32m 5[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould identify exact duplicate titles[32m 5[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould identify similar titles with different wording[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould identify recipes with similar ingredients[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould select the most complete recipe as canonical[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould merge multiple duplicate groups[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mdeduplicateRecipes[2m > [22mshould update recipe duplicate_group_id[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mgetUniqueRecipes[2m > [22mshould return only canonical recipes from duplicate groups[32m 3[2mms[22m[39m
+ [32m✓[39m src/__tests__/deduplicator.test.ts[2m > [22mgetUniqueRecipes[2m > [22mshould return all recipes when no duplicates[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse simple ingredient with quantity and unit[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with fraction[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with unicode fraction[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with mixed number and fraction[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with tablespoon[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with teaspoon abbreviation[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with notes in parentheses[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with notes after comma[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient without unit[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with "of"[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould handle ingredient with no quantity[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with ounces[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould parse ingredient with grams[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mparseIngredient[2m > [22mshould preserve original text[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mextractMainIngredient[2m > [22mshould remove modifiers like "fresh"[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mextractMainIngredient[2m > [22mshould remove modifiers like "chopped"[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/ingredient-parser.test.ts[2m > [22mextractMainIngredient[2m > [22mshould remove multiple modifiers[32m 0[2mms[22m[39m
+ [31m×[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mbasic normalization[2m > [22mshould generate a stable ID[32m 17[2mms[22m[39m
+[31m   → expected 16 to be 12 // Object.is equality[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mbasic normalization[2m > [22mshould clean title[32m 3[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mbasic normalization[2m > [22mshould parse ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mtime parsing[2m > [22mshould parse prep time in minutes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mtime parsing[2m > [22mshould parse cook time in hours and minutes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mtime parsing[2m > [22mshould calculate total time from prep + cook[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mtime parsing[2m > [22mshould parse ISO 8601 duration[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mservings parsing[2m > [22mshould parse simple servings[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mservings parsing[2m > [22mshould parse "serves X" format[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mservings parsing[2m > [22mshould parse range and return average[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mmeal type derivation[2m > [22mshould identify breakfast recipes[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mmeal type derivation[2m > [22mshould identify dessert recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mmeal type derivation[2m > [22mshould default to dinner[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mprotein derivation[2m > [22mshould identify chicken[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mprotein derivation[2m > [22mshould identify beef[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mprotein derivation[2m > [22mshould identify fish[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mprotein derivation[2m > [22mshould return other for no protein[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mequipment derivation[2m > [22mshould identify oven[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mequipment derivation[2m > [22mshould identify slow cooker[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mequipment derivation[2m > [22mshould identify instant pot[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mequipment derivation[2m > [22mshould identify air fryer[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mspice level derivation[2m > [22mshould rate mild for no spicy ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mspice level derivation[2m > [22mshould rate medium for jalapeño[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mspice level derivation[2m > [22mshould rate very hot for ghost pepper[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mkid-friendly score[2m > [22mshould score high for pasta[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mkid-friendly score[2m > [22mshould score low for spicy dishes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mweeknight score[2m > [22mshould score high for quick recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mweeknight score[2m > [22mshould score low for long recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mcost tier derivation[2m > [22mshould identify high cost for seafood[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mcost tier derivation[2m > [22mshould identify low cost for budget ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mcuisine derivation[2m > [22mshould identify Italian cuisine[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mcuisine derivation[2m > [22mshould identify Mexican cuisine[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mnormalizeSourceName[2m > [22mshould normalize HelloFresh variations[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mnormalizeSourceName[2m > [22mshould normalize other common sources[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mnormalizeSourceName[2m > [22mshould return cleaned hostname for unknown sources[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mnormalizeSourceName[2m > [22mshould return Unknown for null inputs[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misHelloFresh[2m > [22mshould detect HelloFresh from source_name[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misHelloFresh[2m > [22mshould detect HelloFresh from source_url[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misHelloFresh[2m > [22mshould detect HelloFresh from tags[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misHelloFresh[2m > [22mshould return false for non-HelloFresh recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould detect pasta from title[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould detect pasta from ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould detect pasta from tags[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould return false for non-pasta dishes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould detect Asian noodle dishes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misPastaRecipe[2m > [22mshould return inference reason[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misComfortFood[2m > [22mshould detect comfort food from title keywords[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misComfortFood[2m > [22mshould detect comfort food from tags[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misComfortFood[2m > [22mshould detect comfort food from multiple creamy ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misComfortFood[2m > [22mshould return false for non-comfort food[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerFriendlyGuess[2m > [22mshould detect freezer-friendly from title (as candidate)[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerFriendlyGuess[2m > [22mshould mark salads as not freezer-friendly[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerFriendlyGuess[2m > [22mshould detect from explicit notes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerFriendlyGuess[2m > [22mshould return unknown for ambiguous recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerFriendlyGuess[2m > [22mshould detect freezer tag[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegetarian[2m > [22mshould return true for vegetarian proteins[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegetarian[2m > [22mshould return false for meat proteins[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegetarian[2m > [22mshould detect from tags[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegan[2m > [22mshould detect vegan from tags[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegan[2m > [22mshould return false for eggs protein[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misVegan[2m > [22mshould return false when not explicitly tagged[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mcalculateMacros[2m > [22mshould calculate macros when all values present[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mcalculateMacros[2m > [22mshould mark incomplete when nutrition missing[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mcalculateMacros[2m > [22mshould mark incomplete when any macro is null[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mcalculateMacros[2m > [22mshould check macro_target_ok correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mcalculateMacros[2m > [22mshould return macro_target_ok false when out of range[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetKidFriendlyBucket[2m > [22mshould return High for >= 0.75[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetKidFriendlyBucket[2m > [22mshould return Med for >= 0.55 and < 0.75[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetKidFriendlyBucket[2m > [22mshould return Low for < 0.55[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetWeeknightBucket[2m > [22mshould use same thresholds as kid-friendly[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould build complete selection record[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould compute total_time from prep + cook when missing[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould keep total_time as null when unknown[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould add computed tags[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould include new fields[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mbuildSelectionRecord[2m > [22mshould populate warnings for missing data[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mvalidateSelectionRecords[2m > [22mshould pass for valid records[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mvalidateSelectionRecords[2m > [22mshould detect duplicate IDs[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mvalidateSelectionRecords[2m > [22mshould detect empty titles[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mvalidateSelectionRecords[2m > [22mshould allow null total_time_minutes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetSpiceLevelLabel[2m > [22mshould return correct labels for spice levels[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetNutritionProfile[2m > [22mshould return unknown for incomplete macros[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetNutritionProfile[2m > [22mshould return lean for high protein low fat[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetNutritionProfile[2m > [22mshould return comfort for high fat[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetNutritionProfile[2m > [22mshould return balanced for middle values[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetReheatQuality[2m > [22mshould return excellent for soups and stews[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetReheatQuality[2m > [22mshould return good for casseroles and pasta[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetReheatQuality[2m > [22mshould return fair for fried items[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgetReheatQuality[2m > [22mshould return unknown for ambiguous recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerCandidateHeuristic[2m > [22mshould return true for freezer-type dishes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22misFreezerCandidateHeuristic[2m > [22mshould return false for other dishes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgenerateDataQualityReport[2m > [22mshould calculate percentages correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/selection-index.test.ts[2m > [22mgenerateDataQualityReport[2m > [22mshould aggregate warnings[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mnormalizeRecipeTitle[2m > [22mlowercases and strips punctuation[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mnormalizeRecipeTitle[2m > [22mcollapses whitespace[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mnormalizeRecipeTitle[2m > [22mhandles curly apostrophes[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mnormalizeRecipeTitle[2m > [22mhandles ampersand[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mnormalizeRecipeTitle[2m > [22mhandles empty string[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mloadHistory[2m > [22mreturns empty array when file does not exist[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mloadHistory[2m > [22mloads a valid array from disk[32m 26[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mloadHistory[2m > [22mreturns empty array on invalid JSON[32m 11[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mloadHistory[2m > [22mreturns empty array when file contains non-array JSON[32m 7[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mappendToHistory[2m > [22mcreates the file and adds entries[32m 4[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mappendToHistory[2m > [22mdeduplicates by ID on repeated appends[32m 3[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mappendToHistory[2m > [22mdoes nothing when all ids already present[32m 3[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — exact ID match[2m > [22mexcludes records whose IDs appear in history[32m 5[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — exact ID match[2m > [22mreturns all records when history is empty[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — exact ID match[2m > [22mreports historyCount correctly[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — exact ID match[2m > [22mincludes correct historyPath in result[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — normalized title fallback[2m > [22mexcludes by normalized title when ID does not match[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — normalized title fallback[2m > [22mmatches despite punctuation differences[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — normalized title fallback[2m > [22mprefers ID match over title match[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/history.test.ts[2m > [22mapplyHistoryExclusion — normalized title fallback[2m > [22mdoes not match on very short/empty title[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mparses protein slot counts correctly[32m 6[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mparses "at least 2 meals are kid friendly"[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mparses macro percentage ranges[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects weight loss goal[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects freezer/meal prep goal[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects HelloFresh requirement[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects pasta requirement[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects comfort food[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects healthy fats goal[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects low trans fat goal[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdetects preferred ingredients[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline[2m > [22mdefaults to 4 slots when none detected[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCandidatesForPlan[2m > [22massigns chicken to chicken slot only[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCandidatesForPlan[2m > [22massigns vegetarian recipes to vegetarian slot[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCandidatesForPlan[2m > [22mexcludes recipes with meat from vegetarian slot[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCandidatesForPlan[2m > [22mreports empty slots correctly[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mscoreRecipeForRequest[2m > [22mscores macro fit only when nutrition exists[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mscoreRecipeForRequest[2m > [22mrewards preferred ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mscoreRecipeForRequest[2m > [22mdoes not invent nutrition values when data is absent[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mscoreRecipeForRequest[2m > [22mdoes not apply a source-specific bonus to HelloFresh recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCanonicalIngredientKeys[2m > [22mnormalizes garlic cloves to garlic[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetCanonicalIngredientKeys[2m > [22mnormalizes olive oil variants[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mreturns only IDs that exist in normalizedById[32m 3[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22msatisfies required protein slots when candidates exist[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mselects no duplicate recipes[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mselects a HelloFresh recipe when required (via swap)[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mselects a pasta recipe when required[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mwarns when no candidates exist for a slot[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan[2m > [22mcomputes shopping overlap correctly[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult[2m > [22mpasses when all IDs exist in local database[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult[2m > [22mfails when a recipe ID does not exist in local database[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult[2m > [22mwarns when kid-friendly minimum is not met[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult[2m > [22mwarns when nutrition is missing instead of assuming values[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22misAiExplanationSafe[2m > [22maccepts explanation with no foreign recipe IDs[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22misAiExplanationSafe[2m > [22mrejects explanation that contains a foreign recipe ID[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mrenderPlanAsMarkdown[2m > [22mproduces a markdown string with recipe titles[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mrenderPlanAsMarkdown[2m > [22mshows validation warnings when present[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mparsePlanRequestOffline — flex slot (no other)[2m > [22mproduces flexMealCount for extra meals beyond explicit slots[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcalculateMacroPercentages[2m > [22mcomputes protein, carbs, fat % from gram values[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcalculateMacroPercentages[2m > [22mreturns null when any macro gram value is missing[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcalculateMacroPercentages[2m > [22mreturns null when total macro calories is zero[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult — macro evaluation status[2m > [22mreports partial when some recipes lack macro data[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult — macro evaluation status[2m > [22mstructuralConstraintsSatisfied can be true when nutritionTargetsSatisfied is false[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mscoreRecipeForRequest — missingNutritionFields deduplication[2m > [22mdoes not contain duplicate field names[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mrenderPlanAsMarkdown — partial nutrition display[2m > [22mshows "not available" for recipes missing some macro grams[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan — pasta variety[2m > [22mdoes not select the same recipe twice[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan — pantry item exclusion[2m > [22mexcludes salt and pepper from sharedIngredients main list[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22misSuspiciousServingCount[2m > [22mflags large chili/stew with yield_servings=1 and many ingredients[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22misSuspiciousServingCount[2m > [22mdoes not flag a simple single-serving recipe[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mbuildWeeklyPlan — alternatives with titles[2m > [22malternatives include recipe titles in entries[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mvalidatePlanResult — structural vs nutrition separation[2m > [22mstructural constraints pass while nutrition targets may fail[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcomputeRecipeHash[2m > [22mis stable for the same recipe[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcomputeRecipeHash[2m > [22mchanges when the title changes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mcomputeRecipeHash[2m > [22mproduces a 16-character hex string[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetMissingPlanningFields[2m > [22mreturns empty for a fully-populated recipe[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetMissingPlanningFields[2m > [22mreports missing nutrition when calories are null[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mgetMissingPlanningFields[2m > [22mreports missing kid_friendly_score when 0[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mapplyEnrichmentForSoftScoring[2m > [22mdoes not mutate the original recipe[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mapplyEnrichmentForSoftScoring[2m > [22mdoes not overwrite existing nutrition values[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mloadEnrichmentCache and enrichRecipes[2m > [22mreturns empty cache for non-existent file[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mloadEnrichmentCache and enrichRecipes[2m > [22mmissing API key: enrichRecipes skips enrichment gracefully[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mloadEnrichmentCache and enrichRecipes[2m > [22menrichRecipes respects limit[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mloadEnrichmentCache and enrichRecipes[2m > [22mcached enrichment prevents duplicate API calls[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mrenderer — enrichment summary[2m > [22mclearly labels enriched metadata in output[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/planner.test.ts[2m > [22mrenderer — enrichment summary[2m > [22mshows API key missing message when no key[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mHTML Parser[2m > [22mshould identify HTML files by extension[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mHTML Parser[2m > [22mshould identify HTML content[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mHTML Parser[2m > [22mshould parse basic HTML recipe[32m 42[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mHTML Parser[2m > [22mshould parse schema.org JSON-LD recipe[32m 6[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mText Parser[2m > [22mshould identify text files by extension[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mText Parser[2m > [22mshould parse Paprika text format[32m 2[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mText Parser[2m > [22mshould parse generic text recipe[32m 1[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mJSON Parser[2m > [22mshould identify JSON files by extension[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mJSON Parser[2m > [22mshould parse JSON recipe[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mJSON Parser[2m > [22mshould parse array of recipes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mMCB Parser[2m > [22mshould identify Paprika recipe files by extension[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mMCB Parser[2m > [22mshould identify gzipped content by magic bytes[32m 0[2mms[22m[39m
+ [32m✓[39m src/__tests__/parsers.test.ts[2m > [22mMCB Parser[2m > [22mshould identify ZIP content by magic bytes[32m 0[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m src/__tests__/normalizer.test.ts[2m > [22mnormalizeRecipe[2m > [22mbasic normalization[2m > [22mshould generate a stable ID
+[31m[1mAssertionError[22m: expected 16 to be 12 // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 12[39m
+[31m+ 16[39m
+
+[36m [2m❯[22m src/__tests__/normalizer.test.ts:[2m28:32[22m[39m
+    [90m 26|[39m
+    [90m 27|[39m       [34mexpect[39m(result[33m.[39mid)[33m.[39m[34mtoBeDefined[39m()[33m;[39m
+    [90m 28|[39m       [34mexpect[39m(result[33m.[39mid[33m.[39mlength)[33m.[39m[34mtoBe[39m([34m12[39m)[33m;[39m
+    [90m   |[39m                                [31m^[39m
+    [90m 29|[39m
+    [90m 30|[39m       [90m// Same input should produce same ID[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m6 passed[39m[22m[90m (7)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m216 passed[39m[22m[90m (217)[39m
+[2m   Start at [22m 11:43:44
+[2m   Duration [22m 911ms[2m (transform 1.07s, setup 0ms, import 1.93s, tests 237ms, environment 1ms)[22m
+

@@ -492,7 +492,10 @@ describe('scoreRecipeForRequest', () => {
     expect(typeof score.score).toBe('number');
   });
 
-  it('rewards HelloFresh recipes', () => {
+  it('does not apply a source-specific bonus to HelloFresh recipes', () => {
+    // HelloFresh used to receive a flat bonus to compensate for missing macro data.
+    // That bonus has been removed — all sources now compete on equal nutritional
+    // criteria via the enrichment pipeline. Verify no source-specific score entry exists.
     const req: WeeklyPlanRequest = {
       mealCount: 1,
       requiredProteinSlots: ['chicken'],
@@ -505,7 +508,8 @@ describe('scoreRecipeForRequest', () => {
     const hfScore = scoreRecipeForRequest(hfRecipe, req);
     const normalScore = scoreRecipeForRequest(normalRecipe, req);
 
-    expect(hfScore.scoreBreakdown.helloFresh ?? 0).toBeGreaterThan(0);
+    // Neither recipe should carry a source-specific bonus in the breakdown.
+    expect(hfScore.scoreBreakdown.helloFresh ?? 0).toBe(0);
     expect(normalScore.scoreBreakdown.helloFresh ?? 0).toBe(0);
   });
 });

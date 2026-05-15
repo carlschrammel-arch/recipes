@@ -269,8 +269,82 @@ function enforceRequiredSingletons(
 }
 
 // ============================================================================
-// Ingredient waste classification
+// Source diversity enforcement
 // ============================================================================
+
+/**
+ * Prevent any single recipe source from dominating the plan.
+ * If a source accounts for more than half the selected recipes (and it wasn't
+ * explicitly required), swap the lowest-scoring excess recipes with the best
+ * available alternatives from different sources.
+ */
+function enforceSourceDiversity(
+  plan: PartialPlan,
+  candidatesBySlot: Map<string, Array<{ recipe: PlannerRecipe; score: CandidateScore }>>,
+  request: WeeklyPlanRequest
+): PartialPlan {
+  const totalSlots = plan.assignments.size;
+  if (totalSlots <= 2) return plan; // No point diversifying tiny plans
+
+  // Max allowed from any one source: floor(total/2), minimum 2
+  const maxFromOneSource = Math.max(2, Math.floor(totalSlots / 2));
+
+  // Detect required sources (shouldn't be diversity-penalised)
+  const requiredSources = new Set<string>(
+    (request.requiredSourceSignals ?? []).map((s) => s.toLowerCase())
+  );
+
+  // Count how many times each source_normalized appears in current plan
+  for (let pass = 0; pass < totalSlots; pass++) {
+    const sourceCounts = new Map<string, string[]>(); // source → array of slot keys
+    for (const [slot, recipe] of plan.assignments) {
+      const src = recipe.norm.source_name ?? recipe.sel.source_normalized ?? '';
+      if (!sourceCounts.has(src)) sourceCounts.set(src, []);
+      sourceCounts.get(src)!.push(slot);
+    }
+
+    let swapped = false;
+    for (const [src, slots] of sourceCounts) {
+      const srcLower = src.toLowerCase();
+      if (slots.length <= maxFromOneSource) continue;
+      if (requiredSources.has(srcLower)) continue;
+
+      // Find the slot with the worst-scoring recipe from this over-represented source
+      const slotsByScore = slots
+        .map((slot) => {
+          const recipe = plan.assignments.get(slot)!;
+          const slotScore = candidatesBySlot
+            .get(slot)
+            ?.find((c) => c.recipe.norm.id === recipe.norm.id)?.score.score ?? 0;
+          return { slot, recipe, slotScore };
+        })
+        .sort((a, b) => a.slotScore - b.slotScore); // worst first
+
+      // Try to swap the worst-scoring same-source recipe with the best alternative
+      // from a different source
+      for (const { slot, recipe: worstRecipe } of slotsByScore) {
+        const candidates = candidatesBySlot.get(slot) ?? [];
+        const alternative = candidates.find(
+          (c) =>
+            !plan.usedIds.has(c.recipe.norm.id) &&
+            (c.recipe.norm.source_name ?? c.recipe.sel.source_normalized ?? '') !== src
+        );
+        if (alternative) {
+          plan = clonePartialPlan(plan);
+          plan.usedIds.delete(worstRecipe.norm.id);
+          plan.assignments.set(slot, alternative.recipe);
+          plan.usedIds.add(alternative.recipe.norm.id);
+          swapped = true;
+          break;
+        }
+      }
+      if (swapped) break; // Re-evaluate counts from scratch
+    }
+    if (!swapped) break; // No more swaps needed
+  }
+
+  return plan;
+}
 
 /**
  * Pure pantry staples — long shelf life, always stocked, not meaningful grocery items.
@@ -760,6 +834,9 @@ export function buildWeeklyPlan(
     request
   );
   bestPlan = finalPlan;
+
+  // --- 4c. Source diversity: cap over-represented sources ---
+  bestPlan = enforceSourceDiversity(bestPlan, scoredBySlot, request);
 
   // --- 4b. Flex deduplication: if the flex slot has pasta and pasta is already
   //         satisfied by a required slot, try to swap it for a non-pasta alternative

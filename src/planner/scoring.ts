@@ -10,6 +10,7 @@
 
 import type { WeeklyPlanRequest, PlannerRecipe, CandidateScore } from './types.js';
 import type { NormalizedRecipe } from '../types.js';
+import type { SelectionRecord } from '../selection-index.js';
 
 // ============================================================================
 // Constants
@@ -161,7 +162,6 @@ const W = {
   transFat: { low: 0.5, high: 0.0 },
   preferredIngredient: 0.25, // per match
   maxPreferredScore: 1.5,
-  helloFreshBonus: 0.5,
   pastaBonus: 0.3,
   comfortFoodBonus: 0.3,
   cuisineBonus: 0.1,
@@ -196,6 +196,68 @@ function macroFitGradient(
 }
 
 // ============================================================================
+// Effective macro computation — source-equalizing fallback
+// ============================================================================
+
+interface EffectiveMacros {
+  macro_pct_protein: number | null;
+  macro_pct_carbs: number | null;
+  macro_pct_fat: number | null;
+  protein_g: number | null;
+  calories: number | null;
+}
+
+/**
+ * Compute effective macro values for scoring by combining the pre-computed
+ * catalog SelectionRecord with enrichment-estimated values from norm.nutrition.
+ *
+ * Priority: sel.* (real source data) > norm.nutrition (enrichment estimates).
+ *
+ * This allows all recipes — regardless of which source published them — to
+ * compete on the same nutritional signals once the enrichment process has
+ * estimated their missing macro data. Without this fallback, sources that
+ * don't publish macros (e.g. HelloFresh) score 0 on every nutrition signal,
+ * making source-specific bonuses the only way to surface them.
+ */
+function computeEffectiveMacros(sel: SelectionRecord, norm: NormalizedRecipe): EffectiveMacros {
+  // If catalog already has full macro percentages, use them as-is (fastest path).
+  if (sel.macro_pct_protein !== null && sel.macro_pct_carbs !== null && sel.macro_pct_fat !== null) {
+    return {
+      macro_pct_protein: sel.macro_pct_protein,
+      macro_pct_carbs: sel.macro_pct_carbs,
+      macro_pct_fat: sel.macro_pct_fat,
+      protein_g: sel.protein_g,
+      calories: sel.calories,
+    };
+  }
+
+  // Try to compute from norm.nutrition (may include enrichment estimates applied
+  // at load time via applyEnrichmentForSoftScoring).
+  const n = norm.nutrition;
+  if (n && n.protein_g != null && n.carbs_g != null && n.fat_g != null) {
+    const kcal = n.protein_g * 4 + n.carbs_g * 4 + n.fat_g * 9;
+    if (kcal > 0) {
+      return {
+        macro_pct_protein: sel.macro_pct_protein ?? (n.protein_g * 4 / kcal) * 100,
+        macro_pct_carbs:   sel.macro_pct_carbs   ?? (n.carbs_g   * 4 / kcal) * 100,
+        macro_pct_fat:     sel.macro_pct_fat     ?? (n.fat_g     * 9 / kcal) * 100,
+        protein_g: sel.protein_g ?? n.protein_g,
+        calories:  sel.calories  ?? n.calories,
+      };
+    }
+  }
+
+  // Final fallback: whatever sel has (may all be null).
+  return {
+    macro_pct_protein: sel.macro_pct_protein,
+    macro_pct_carbs:   sel.macro_pct_carbs,
+    macro_pct_fat:     sel.macro_pct_fat,
+    protein_g: sel.protein_g,
+    calories:  sel.calories,
+  };
+}
+
+// ============================================================================
 // Main scoring function
 // ============================================================================
 
@@ -213,6 +275,11 @@ export function scoreRecipeForRequest(
   const matchedPreferredIngredients: string[] = [];
   let score = 0;
 
+  // Compute effective macro values: real catalog data where available, enrichment
+  // estimates from norm.nutrition otherwise. This ensures all recipe sources compete
+  // on equal footing when enrichment has filled in their missing macro data.
+  const em = computeEffectiveMacros(sel, norm);
+
   // ---------- Macro targets ----------
   if (request.macroTargets) {
     // Double the macro importance when the user also set related goals
@@ -225,10 +292,10 @@ export function scoreRecipeForRequest(
 
     if (request.macroTargets.proteinPct) {
       macroDataExpected++;
-      if (sel.macro_pct_protein !== null) {
+      if (em.macro_pct_protein !== null) {
         macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.proteinPct;
-        macroScore += macroFitGradient(sel.macro_pct_protein, minPct, maxPct) * W.macroFit.protein * macroImportance;
+        macroScore += macroFitGradient(em.macro_pct_protein, minPct, maxPct) * W.macroFit.protein * macroImportance;
       } else {
         missingNutritionSet.add('protein_pct');
       }
@@ -236,10 +303,10 @@ export function scoreRecipeForRequest(
 
     if (request.macroTargets.carbsPct) {
       macroDataExpected++;
-      if (sel.macro_pct_carbs !== null) {
+      if (em.macro_pct_carbs !== null) {
         macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.carbsPct;
-        macroScore += macroFitGradient(sel.macro_pct_carbs, minPct, maxPct) * W.macroFit.carbs * macroImportance;
+        macroScore += macroFitGradient(em.macro_pct_carbs, minPct, maxPct) * W.macroFit.carbs * macroImportance;
       } else {
         missingNutritionSet.add('carbs_pct');
       }
@@ -247,10 +314,10 @@ export function scoreRecipeForRequest(
 
     if (request.macroTargets.fatPct) {
       macroDataExpected++;
-      if (sel.macro_pct_fat !== null) {
+      if (em.macro_pct_fat !== null) {
         macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.fatPct;
-        macroScore += macroFitGradient(sel.macro_pct_fat, minPct, maxPct) * W.macroFit.fat * macroImportance;
+        macroScore += macroFitGradient(em.macro_pct_fat, minPct, maxPct) * W.macroFit.fat * macroImportance;
       } else {
         missingNutritionSet.add('fat_pct');
       }
@@ -277,22 +344,22 @@ export function scoreRecipeForRequest(
     // Protein density: score recipes by how much protein they deliver per calorie.
     // A recipe with 30g protein / 500 kcal = 6g/100kcal is better than 10g / 200kcal = 5g/100kcal.
     // Scale: ≥8g protein per 100 kcal → full score; below 4g → no bonus.
-    if (sel.protein_g !== null && sel.calories !== null && sel.calories > 0) {
-      const proteinPer100kcal = (sel.protein_g / sel.calories) * 100;
+    if (em.protein_g !== null && em.calories !== null && em.calories > 0) {
+      const proteinPer100kcal = (em.protein_g / em.calories) * 100;
       const densityScore = Math.min(Math.max((proteinPer100kcal - 4) / 4, 0), 1.0);
       wlScore += densityScore * W.weightLoss.proteinDensity;
-    } else if (sel.macro_pct_protein !== null) {
+    } else if (em.macro_pct_protein !== null) {
       // Fall back to macro % when gram data is absent
-      const approxDensityScore = Math.min(Math.max((sel.macro_pct_protein - 20) / 15, 0), 1.0);
+      const approxDensityScore = Math.min(Math.max((em.macro_pct_protein - 20) / 15, 0), 1.0);
       wlScore += approxDensityScore * W.weightLoss.proteinDensity * 0.7;
     } else {
       missingNutritionSet.add('protein_density');
     }
 
-    if (sel.macro_pct_protein !== null && sel.macro_pct_protein >= 25) {
+    if (em.macro_pct_protein !== null && em.macro_pct_protein >= 25) {
       wlScore += W.weightLoss.protPct;
     }
-    if (sel.macro_pct_fat !== null && sel.macro_pct_fat <= 35) {
+    if (em.macro_pct_fat !== null && em.macro_pct_fat <= 35) {
       wlScore += W.weightLoss.fatPct;
     }
 
@@ -302,9 +369,9 @@ export function scoreRecipeForRequest(
 
   // ---------- High protein ----------
   if (request.goals.highProtein) {
-    if (sel.macro_pct_protein !== null) {
+    if (em.macro_pct_protein !== null) {
       // Scale: 35% protein → score 1.0
-      const hpScore = Math.min(sel.macro_pct_protein / 35, 1.0) * W.highProtein;
+      const hpScore = Math.min(em.macro_pct_protein / 35, 1.0) * W.highProtein;
       breakdown.highProtein = hpScore;
       score += hpScore;
     } else {
@@ -314,9 +381,9 @@ export function scoreRecipeForRequest(
 
   // ---------- Low fat ----------
   if (request.goals.lowFat) {
-    if (sel.macro_pct_fat !== null) {
+    if (em.macro_pct_fat !== null) {
       // Scale: 15% fat → 1.0, 45% fat → 0.0
-      const lfScore = Math.max(0, 1.0 - (sel.macro_pct_fat - 15) / 30) * W.lowFat;
+      const lfScore = Math.max(0, 1.0 - (em.macro_pct_fat - 15) / 30) * W.lowFat;
       breakdown.lowFat = lfScore;
       score += lfScore;
     } else {
@@ -401,12 +468,6 @@ export function scoreRecipeForRequest(
     );
     breakdown.preferredIngredients = prefScore;
     score += prefScore;
-  }
-
-  // ---------- HelloFresh bonus ----------
-  if (sel.is_hellofresh) {
-    breakdown.helloFresh = W.helloFreshBonus;
-    score += W.helloFreshBonus;
   }
 
   // ---------- Pasta bonus ----------
