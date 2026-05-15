@@ -108,8 +108,46 @@ function addRecipeToPartialPlan(
 }
 
 // ============================================================================
-// Singleton enforcement (HelloFresh, pasta)
+// Singleton enforcement (HelloFresh, pasta, kid-friendly)
 // ============================================================================
+
+const KID_FRIENDLY_THRESHOLD = 0.6;
+
+/**
+ * Find the best slot to swap a singleton candidate into.
+ *
+ * Searches each plan slot's OWN candidate pool to ensure the replacement is
+ * slot-compatible (e.g., a chicken recipe never ends up in the vegetarian slot).
+ * Among all slots that have a valid replacement, prefer the one with the
+ * lowest-scoring current recipe so we lose the least by swapping.
+ */
+function findBestSingletonSwap(
+  plan: PartialPlan,
+  candidatesBySlot: Map<string, Array<{ recipe: PlannerRecipe; score: CandidateScore }>>,
+  predicate: (c: { recipe: PlannerRecipe; score: CandidateScore }) => boolean,
+  skipCurrentPredicate?: (current: PlannerRecipe) => boolean
+): { slot: string; candidate: { recipe: PlannerRecipe; score: CandidateScore }; currentScore: number } | null {
+  const options: Array<{
+    slot: string;
+    candidate: { recipe: PlannerRecipe; score: CandidateScore };
+    currentScore: number;
+  }> = [];
+
+  for (const [slot, candidates] of candidatesBySlot) {
+    const current = plan.assignments.get(slot);
+    if (!current) continue; // Only look at slots that are actually assigned in the plan
+    if (skipCurrentPredicate && skipCurrentPredicate(current)) continue; // e.g., skip already-kid-friendly slots
+    const replacement = candidates.find((c) => !plan.usedIds.has(c.recipe.norm.id) && predicate(c));
+    if (!replacement) continue;
+    const currentScore =
+      candidates.find((c) => c.recipe.norm.id === current.norm.id)?.score.score ?? 0;
+    options.push({ slot, candidate: replacement, currentScore });
+  }
+
+  if (options.length === 0) return null;
+  // Prefer to swap out the lowest-scoring current recipe
+  return options.sort((a, b) => a.currentScore - b.currentScore)[0];
+}
 
 /**
  * If requiredSourceSignals or requiredTagsOrTitleTerms are set and not satisfied
@@ -124,41 +162,22 @@ function enforceRequiredSingletons(
 ): { plan: PartialPlan; warnings: string[] } {
   const warnings: string[] = [];
 
-  const selectedRecipes = [...plan.assignments.values()];
-
   // ---- HelloFresh requirement ----
   if (request.requiredSourceSignals?.includes('hellofresh')) {
-    const hasHF = selectedRecipes.some((r) => r.sel.is_hellofresh);
+    const hasHF = [...plan.assignments.values()].some((r) => r.sel.is_hellofresh);
     if (!hasHF) {
-      // Find any slot that has a HF candidate not already used
-      let swapped = false;
-      for (const [slot, candidates] of candidatesBySlot) {
-        const hfCandidate = candidates.find(
-          (c) => c.recipe.sel.is_hellofresh && !plan.usedIds.has(c.recipe.norm.id)
-        );
-        if (hfCandidate) {
-          // Find the lowest-scoring recipe currently in this slot or the overall lowest
-          const currentInSlot = plan.assignments.get(slot);
-          const overallLowest = [...plan.assignments.entries()]
-            .map(([s, r]) => ({ slot: s, recipe: r }))
-            .sort((a, b) => {
-              const sa = candidatesBySlot.get(a.slot)?.find((c) => c.recipe.norm.id === a.recipe.norm.id)?.score.score ?? 0;
-              const sb = candidatesBySlot.get(b.slot)?.find((c) => c.recipe.norm.id === b.recipe.norm.id)?.score.score ?? 0;
-              return sa - sb;
-            })[0];
-
-          const targetSlot = overallLowest?.slot ?? slot;
-          const removedId = plan.assignments.get(targetSlot)?.norm.id;
-
-          plan = clonePartialPlan(plan);
-          plan.assignments.set(targetSlot, hfCandidate.recipe);
-          if (removedId) plan.usedIds.delete(removedId);
-          plan.usedIds.add(hfCandidate.recipe.norm.id);
-          swapped = true;
-          break;
-        }
-      }
-      if (!swapped) {
+      const swap = findBestSingletonSwap(
+        plan, candidatesBySlot,
+        (c) => c.recipe.sel.is_hellofresh
+      );
+      if (swap) {
+        const { slot, candidate } = swap;
+        const removedId = plan.assignments.get(slot)?.norm.id;
+        plan = clonePartialPlan(plan);
+        plan.assignments.set(slot, candidate.recipe);
+        if (removedId) plan.usedIds.delete(removedId);
+        plan.usedIds.add(candidate.recipe.norm.id);
+      } else {
         warnings.push(
           'HelloFresh requirement: no HelloFresh recipes found in any candidate pool. ' +
           'Check that your catalog contains HelloFresh recipes (run "recipe-context build" to refresh).'
@@ -171,32 +190,18 @@ function enforceRequiredSingletons(
   if (request.requiredTagsOrTitleTerms?.includes('pasta')) {
     const hasPasta = [...plan.assignments.values()].some((r) => r.sel.is_pasta);
     if (!hasPasta) {
-      let swapped = false;
-      for (const [slot, candidates] of candidatesBySlot) {
-        const pastaCandidate = candidates.find(
-          (c) => c.recipe.sel.is_pasta && !plan.usedIds.has(c.recipe.norm.id)
-        );
-        if (pastaCandidate) {
-          const overallLowest = [...plan.assignments.entries()]
-            .map(([s, r]) => ({ slot: s, recipe: r }))
-            .sort((a, b) => {
-              const sa = candidatesBySlot.get(a.slot)?.find((c) => c.recipe.norm.id === a.recipe.norm.id)?.score.score ?? 0;
-              const sb = candidatesBySlot.get(b.slot)?.find((c) => c.recipe.norm.id === b.recipe.norm.id)?.score.score ?? 0;
-              return sa - sb;
-            })[0];
-
-          const targetSlot = overallLowest?.slot ?? slot;
-          const removedId = plan.assignments.get(targetSlot)?.norm.id;
-
-          plan = clonePartialPlan(plan);
-          plan.assignments.set(targetSlot, pastaCandidate.recipe);
-          if (removedId) plan.usedIds.delete(removedId);
-          plan.usedIds.add(pastaCandidate.recipe.norm.id);
-          swapped = true;
-          break;
-        }
-      }
-      if (!swapped) {
+      const swap = findBestSingletonSwap(
+        plan, candidatesBySlot,
+        (c) => c.recipe.sel.is_pasta
+      );
+      if (swap) {
+        const { slot, candidate } = swap;
+        const removedId = plan.assignments.get(slot)?.norm.id;
+        plan = clonePartialPlan(plan);
+        plan.assignments.set(slot, candidate.recipe);
+        if (removedId) plan.usedIds.delete(removedId);
+        plan.usedIds.add(candidate.recipe.norm.id);
+      } else {
         warnings.push(
           'Pasta requirement: no pasta recipes found in the candidate pools. ' +
           'The plan was built without a pasta dish.'
@@ -212,56 +217,68 @@ function enforceRequiredSingletons(
 
   for (const cuisine of cuisineRequirements) {
     const hasCuisine = [...plan.assignments.values()].some((r) => {
-      const norm = r.norm;
-      const sel = r.sel;
       return (
-        (norm.cuisine?.toLowerCase().includes(cuisine)) ||
-        norm.title.toLowerCase().includes(cuisine) ||
-        sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))
+        r.norm.cuisine?.toLowerCase().includes(cuisine) ||
+        r.norm.title.toLowerCase().includes(cuisine) ||
+        r.sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))
       );
     });
 
     if (!hasCuisine) {
-      let swapped = false;
-      for (const [slot, candidates] of candidatesBySlot) {
-        const cuisineCandidate = candidates.find((c) => {
-          const norm = c.recipe.norm;
-          const sel = c.recipe.sel;
-          return (
-            !plan.usedIds.has(norm.id) &&
-            (
-              (norm.cuisine?.toLowerCase().includes(cuisine)) ||
-              norm.title.toLowerCase().includes(cuisine) ||
-              sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))
-            )
-          );
-        });
-        if (cuisineCandidate) {
-          const overallLowest = [...plan.assignments.entries()]
-            .map(([s, r]) => ({ slot: s, recipe: r }))
-            .sort((a, b) => {
-              const sa = candidatesBySlot.get(a.slot)?.find((c) => c.recipe.norm.id === a.recipe.norm.id)?.score.score ?? 0;
-              const sb = candidatesBySlot.get(b.slot)?.find((c) => c.recipe.norm.id === b.recipe.norm.id)?.score.score ?? 0;
-              return sa - sb;
-            })[0];
-
-          const targetSlot = overallLowest?.slot ?? slot;
-          const removedId = plan.assignments.get(targetSlot)?.norm.id;
-
-          plan = clonePartialPlan(plan);
-          plan.assignments.set(targetSlot, cuisineCandidate.recipe);
-          if (removedId) plan.usedIds.delete(removedId);
-          plan.usedIds.add(cuisineCandidate.recipe.norm.id);
-          swapped = true;
-          break;
-        }
-      }
-      if (!swapped) {
+      const swap = findBestSingletonSwap(
+        plan, candidatesBySlot,
+        (c) =>
+          (c.recipe.norm.cuisine?.toLowerCase().includes(cuisine) ||
+            c.recipe.norm.title.toLowerCase().includes(cuisine) ||
+            c.recipe.sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))) ?? false
+      );
+      if (swap) {
+        const { slot, candidate } = swap;
+        const removedId = plan.assignments.get(slot)?.norm.id;
+        plan = clonePartialPlan(plan);
+        plan.assignments.set(slot, candidate.recipe);
+        if (removedId) plan.usedIds.delete(removedId);
+        plan.usedIds.add(candidate.recipe.norm.id);
+      } else {
         warnings.push(
           `Cuisine requirement "${cuisine}": no ${cuisine} recipes found in any candidate pool. ` +
           'The plan was built without this cuisine.'
         );
       }
+    }
+  }
+
+  // ---- Kid-friendly minimum ----
+  // Post-hoc: if beam search didn't naturally select enough kid-friendly recipes,
+  // swap in kid-friendly candidates (within their own slot pools, preserving compatibility).
+  if (request.minKidFriendlyMeals && request.minKidFriendlyMeals > 0) {
+    let kidCount = [...plan.assignments.values()].filter(
+      (r) => r.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+    ).length;
+
+    while (kidCount < request.minKidFriendlyMeals) {
+      const swap = findBestSingletonSwap(
+        plan,
+        candidatesBySlot,
+        (c) => c.recipe.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD,
+        // Skip slots whose current recipe is already kid-friendly
+        (current) => current.sel.kid_friendly_score >= KID_FRIENDLY_THRESHOLD
+      );
+      if (!swap) break; // No more kid-friendly candidates available
+      const { slot, candidate } = swap;
+      const removedId = plan.assignments.get(slot)?.norm.id;
+      plan = clonePartialPlan(plan);
+      plan.assignments.set(slot, candidate.recipe);
+      if (removedId) plan.usedIds.delete(removedId);
+      plan.usedIds.add(candidate.recipe.norm.id);
+      kidCount++;
+    }
+
+    if (kidCount < request.minKidFriendlyMeals) {
+      warnings.push(
+        `Kid-friendly minimum: could only find ${kidCount} of ${request.minKidFriendlyMeals} ` +
+        `kid-friendly recipes (score ≥ ${KID_FRIENDLY_THRESHOLD}) in the candidate pools.`
+      );
     }
   }
 
