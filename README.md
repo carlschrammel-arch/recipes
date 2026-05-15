@@ -29,7 +29,7 @@ At least some of the meals contain monounsaturated fats or omega-3 fats
 Limited amount of saturated fats
 At least one recipe from Hello Fresh
 At least one that has pasta
-One of the meals can be a comfort food" --verbose --auto-enrich
+One of the meals can be a comfort food" --verbose --auto-enrich --save-history
 
 ```
 

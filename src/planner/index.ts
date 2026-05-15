@@ -20,7 +20,7 @@ import { parsePlanRequestWithAI, parsePlanRequestOffline } from './query-parser.
 import { buildWeeklyPlan } from './optimizer.js';
 import { renderPlanAsMarkdown, isAiExplanationSafe } from './renderer.js';
 import { scoreRecipeForRequest } from './scoring.js';
-import { getExcludedIds, appendToHistory } from './history.js';
+import { applyHistoryExclusion, appendToHistory } from './history.js';
 import {
   loadEnrichmentCache,
   enrichRecipes,
@@ -40,8 +40,8 @@ export { renderPlanAsMarkdown } from './renderer.js';
 export { validatePlanResult, isSuspiciousServingCount } from './validation.js';
 export { scoreRecipeForRequest, getCanonicalIngredientKeys } from './scoring.js';
 export { calculateMacroPercentages, getMissingMacroFields, formatMacroPct } from './macro-calculator.js';
-export { loadHistory, saveHistory } from './history.js';
-export type { HistoryEntry } from './history.js';
+export { loadHistory, saveHistory, historyFilePath, normalizeRecipeTitle, applyHistoryExclusion } from './history.js';
+export type { HistoryEntry, HistoryExclusionResult, HistoryMatchType } from './history.js';
 export { loadEnrichmentCache, enrichRecipes, computeRecipeHash, getMissingPlanningFields, applyEnrichmentForSoftScoring } from './enricher.js';
 
 // ============================================================================
@@ -215,6 +215,13 @@ export interface PlanOutput {
   parseWarnings: string[];
   /** Summary of enrichment activity, if any. */
   enrichmentSummary: EnrichmentSummary | null;
+  /** History exclusion report (present when excludeHistory is true). */
+  historyExclusion: {
+    historyPath: string;
+    historyCount: number;
+    excludedCount: number;
+    excluded: Array<{ id: string; title: string; matchType: 'id' | 'normalized_title' }>;
+  } | null;
 }
 
 /**
@@ -229,14 +236,25 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
   const { selectionRecords: allSelectionRecords, normalizedById } = await loadPlannerData(options.dataPath);
 
   // --- Filter previously-suggested recipes (when exclude-history is requested) ---
-  const excludeHistory = options.excludeHistory ?? options.skipHistory ?? false;
+  const excludeHistory = options.excludeHistory ?? options.skipHistory ?? true;
   const saveHistoryFlag = options.saveHistory ?? options.skipHistory ?? false;
+
   let selectionRecords = allSelectionRecords;
+  let historyExclusionReport: PlanOutput['historyExclusion'] = null;
+
   if (excludeHistory) {
-    const excludedIds = await getExcludedIds(options.dataPath);
-    if (excludedIds.size > 0) {
-      selectionRecords = allSelectionRecords.filter((r) => !excludedIds.has(r.id));
-    }
+    const exclusionResult = await applyHistoryExclusion(options.dataPath, allSelectionRecords);
+    selectionRecords = exclusionResult.available;
+    historyExclusionReport = {
+      historyPath: exclusionResult.historyPath,
+      historyCount: exclusionResult.historyCount,
+      excludedCount: exclusionResult.excluded.length,
+      excluded: exclusionResult.excluded.map((e) => ({
+        id: e.record.id,
+        title: e.record.title ?? e.entry.title,
+        matchType: e.matchType,
+      })),
+    };
   }
 
   // --- Load enrichment cache (always load so we can use cached data even in 'off' mode) ---
@@ -418,7 +436,7 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
     await appendToHistory(options.dataPath, result.selectedRecipes);
   }
 
-  return { result, markdown, aiExplanation, parsedRequest, usedFallback, parseWarnings, enrichmentSummary };
+  return { result, markdown, aiExplanation, parsedRequest, usedFallback, parseWarnings, enrichmentSummary, historyExclusion: historyExclusionReport };
 }
 
 // ============================================================================

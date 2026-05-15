@@ -418,9 +418,9 @@ program
   .option('--max-candidates <n>', 'Max candidates per slot for beam search (default: 75)', parseInt, 75)
   .option('--no-ai-parser', 'Use offline regex parser only (no OpenAI API call for query parsing)')
   .option('--explain', 'Ask AI to write a brief explanation of the selected plan')
-  .option('--save-history', 'Save selected recipes to history (excludes them from future plans)')
-  .option('--exclude-history', 'Exclude previously-suggested recipes from this plan')
-  .option('--no-history', 'Alias for: do not use or update history (legacy, use --exclude-history / --save-history)')
+  .option('--save-history', 'Save selected recipes to history so they are skipped in future plans')
+  .option('--include-history', 'Include previously-suggested recipes even if they are in history (default: history is excluded)')
+  .option('--no-history', 'Alias for --include-history; do not filter history (legacy)')
   .option('--auto-enrich', 'Enrich candidate recipes before scoring (calls OpenAI for missing metadata)')
   .option('--auto-enrich-selected', 'Enrich only selected recipes after initial plan, then re-score (default)')
   .option('--no-auto-enrich', 'Never call OpenAI for enrichment during planning')
@@ -483,8 +483,11 @@ Environment:
         maxCandidatesPerSlot: options.maxCandidates,
         noAiParser: options['no-ai-parser'],
         explain: options.explain,
-        excludeHistory: options['exclude-history'] ?? options['no-history'] ?? false,
-        saveHistory: options['save-history'] ?? false,
+        // History is excluded by default.
+        // Commander.js: --include-history → options.includeHistory
+        //               --no-history     → options.history === false (negation flag)
+        excludeHistory: !options.includeHistory && options.history !== false,
+        saveHistory: options.saveHistory ?? false,
         autoEnrich,
         enrichmentLimit: options.enrichmentLimit ?? 20,
         useEstimatedMacrosForSoftScoring: true,
@@ -515,6 +518,24 @@ Environment:
           }
         }
         console.log();
+
+        // History exclusion report
+        const he = output.historyExclusion;
+        if (he) {
+          console.log(chalk.bold('History:'));
+          console.log(chalk.dim(`  Path:    ${he.historyPath}`));
+          console.log(chalk.dim(`  Entries: ${he.historyCount}`));
+          console.log(chalk.dim(`  Exclude: enabled`));
+          if (he.excludedCount > 0) {
+            console.log(chalk.dim(`  Excluded ${he.excludedCount} recipe(s):`));
+            for (const ex of he.excluded) {
+              console.log(chalk.dim(`    – ${ex.title} (${ex.id}) — matched by ${ex.matchType}`));
+            }
+          } else {
+            console.log(chalk.dim('  No catalog recipes matched history entries.'));
+          }
+          console.log();
+        }
       }
 
       // Print the markdown plan
@@ -551,11 +572,11 @@ Environment:
 
       console.log(chalk.dim(`\nPlan score: ${output.result.planScore.toFixed(2)}`));
       console.log(chalk.dim(`Recipes: ${output.result.selectedRecipes.length} selected from local catalog`));
-      if (options['save-history']) {
-        console.log(chalk.dim('Saved to history. These recipes will be excluded from future plans unless you run --include-history.'));
-        console.log(chalk.dim('Run "recipe-context history" to review or remove entries.'));
+      if (options.saveHistory) {
+        console.log(chalk.dim('Saved to history. These recipes will be skipped in future plans.'));
+        console.log(chalk.dim('Use --include-history to override, or "recipe-context history" to review entries.'));
       } else {
-        console.log(chalk.dim('History not updated. Use --save-history to exclude these from future plans.'));
+        console.log(chalk.dim('History not updated. Use --save-history to skip these in future plans.'));
       }
       console.log();
 
