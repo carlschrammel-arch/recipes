@@ -23,6 +23,8 @@ import { askRecipes } from './ask.js';
 import { planRecipes } from './planner/index.js';
 import { createInterface } from 'readline';
 import { loadHistory, saveHistory, appendToHistory } from './planner/history.js';
+import { loadEnrichmentCache, enrichRecipes } from './planner/enricher.js';
+import { loadPlannerData } from './planner/index.js';
 import type { MealType, PrimaryProtein } from './types.js';
 
 const program = new Command();
@@ -619,6 +621,138 @@ Environment:
   });
 
 // ============================================================================
+// ENRICH Command — bulk-enrich all recipes missing nutrition/planning metadata
+// ============================================================================
+
+program
+  .command('enrich')
+  .description('Enrich all recipes missing nutrition/planning metadata via OpenAI (gpt-4o-mini)')
+  .option('-d, --data <path>', 'Path to recipe data folder', './dist/recipe-context')
+  .option('--model <model>', 'OpenAI model to use for enrichment', 'gpt-4o-mini')
+  .option('--limit <n>', 'Max enrichment API calls (default: all remaining)', parseInt)
+  .option('--dry-run', 'Report what would be enriched without calling OpenAI')
+  .addHelpText('after', `
+Processes all recipes in the catalog that are missing nutrition/planning data.
+Results are cached in recipes.enrichment.jsonl — already-enriched recipes are skipped.
+Each call costs a fraction of a cent (gpt-4o-mini).
+
+Requires OPENAI_API_KEY environment variable.
+
+Examples:
+  $ recipe-context enrich
+  $ recipe-context enrich --dry-run
+  $ recipe-context enrich --limit 50
+`)
+  .action(async (options) => {
+    const dataPath = resolve(options.data);
+    const apiKey = process.env.OPENAI_API_KEY ?? '';
+
+    if (!options.dryRun && !apiKey) {
+      console.error(chalk.red('\nError: OPENAI_API_KEY is not set. Export it or use --dry-run.\n'));
+      process.exit(1);
+    }
+
+    console.log(chalk.bold('\n🔬 Recipe Enrichment\n'));
+
+    // Load data
+    const spinner = ora('Loading catalog…').start();
+    let plannerData: Awaited<ReturnType<typeof loadPlannerData>>;
+    try {
+      plannerData = await loadPlannerData(dataPath);
+    } catch (err) {
+      spinner.fail((err as Error).message);
+      process.exit(1);
+    }
+
+    const cache = await loadEnrichmentCache(dataPath);
+    spinner.stop();
+
+    // Find unenriched recipes (missing calories and not in cache)
+    const allRecipes = [...plannerData.normalizedById.values()];
+    const toEnrich = allRecipes.filter((r) => {
+      // Skip if it has real nutrition data already
+      if (r.nutrition?.calories != null) return false;
+      // Skip if cached and cache is valid
+      const cached = cache.get(r.id);
+      if (cached) return false;
+      return true;
+    });
+
+    const limit = options.limit ?? toEnrich.length;
+
+    console.log(chalk.dim(`Catalog:   ${allRecipes.length} recipes`));
+    console.log(chalk.dim(`Cached:    ${cache.size} enrichment entries`));
+    console.log(chalk.dim(`To enrich: ${toEnrich.length} recipes${toEnrich.length > limit ? ` (limited to ${limit})` : ''}`));
+    console.log();
+
+    if (toEnrich.length === 0) {
+      console.log(chalk.green('✅ All recipes are already enriched!\n'));
+      return;
+    }
+
+    if (options.dryRun) {
+      console.log(chalk.yellow('Dry run — no API calls will be made.\n'));
+      console.log(chalk.bold(`Would enrich ${Math.min(toEnrich.length, limit)} recipes:\n`));
+      const sample = toEnrich.slice(0, Math.min(toEnrich.length, limit));
+      for (const r of sample) {
+        console.log(chalk.dim(`  • ${r.title}`));
+      }
+      console.log();
+      return;
+    }
+
+    // Run enrichment with progress reporting
+    let done = 0;
+    let failed = 0;
+    const enrichProgress = ora(`Enriching 0 / ${Math.min(toEnrich.length, limit)}…`).start();
+
+    const result = await enrichRecipes({
+      recipes: toEnrich,
+      cache,
+      dataPath,
+      apiKey,
+      model: options.model,
+      limit,
+      onProgress: (recipe, fromCache) => {
+        if (!fromCache) done++;
+        enrichProgress.text = chalk.dim(
+          `Enriching ${done} / ${Math.min(toEnrich.length, limit)}… "${recipe.title.slice(0, 45)}"`
+        );
+      },
+    });
+
+    enrichProgress.stop();
+
+    console.log(chalk.green(`\n✅ Enriched ${result.recipesEnriched} recipes`));
+    if (result.skippedDueToLimit > 0) {
+      console.log(chalk.yellow(`   ${result.skippedDueToLimit} skipped (hit --limit). Run again to continue.`));
+    }
+    if (failed > 0) {
+      console.log(chalk.red(`   ${failed} failed (API errors)`));
+    }
+
+    // Spot-check a sample of the new records for plausibility
+    const newIds = new Set(result.enrichedRecipes.map((r) => r.id));
+    const freshCache = await loadEnrichmentCache(dataPath); // Re-read to trigger runtime validation
+    let suspiciousCount = 0;
+    for (const id of newIds) {
+      const rec = freshCache.get(id);
+      if (!rec) { suspiciousCount++; continue; }
+      const m = rec.metadata;
+      // Flag records where ALL macros ended up null (AI gave no useful data)
+      if (m.estimated_calories == null && m.estimated_protein_g == null) {
+        suspiciousCount++;
+      }
+    }
+    if (suspiciousCount > 0) {
+      console.log(chalk.yellow(`\n⚠ ${suspiciousCount} new records have no usable macro data (AI returned implausible values — these recipes will fall back to heuristic scoring).`));
+    }
+
+    console.log(chalk.dim(`\nEstimated fields: ${result.estimatedFields.join(', ')}`));
+    console.log(chalk.dim(`Cache file:       ${join(dataPath, 'recipes.enrichment.jsonl')}\n`));
+  });
+
+// ============================================================================
 // HISTORY Command — review and manage previously-suggested recipes
 // ============================================================================
 
@@ -690,3 +824,4 @@ Examples:
   });
 
 program.parse();
+

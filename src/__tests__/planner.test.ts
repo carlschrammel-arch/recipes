@@ -486,8 +486,8 @@ describe('scoreRecipeForRequest', () => {
 
     // Should still compute a score (without nutrition data)
     expect(score.hardConstraintPass).toBe(true);
-    expect(score.missingNutritionFields).toContain('calories');
-    // Score from weightLoss calorie component should be 0 when calories missing
+    expect(score.missingNutritionFields).toContain('protein_density');
+    // Score from weightLoss protein density component should be 0 when protein data missing
     // (overall score may still be > 0 from other signals)
     expect(typeof score.score).toBe('number');
   });

@@ -205,6 +205,66 @@ function enforceRequiredSingletons(
     }
   }
 
+  // ---- Cuisine requirements (e.g. "cuisine:mexican") ----
+  const cuisineRequirements = (request.requiredTagsOrTitleTerms ?? [])
+    .filter((t) => t.startsWith('cuisine:'))
+    .map((t) => t.slice('cuisine:'.length));
+
+  for (const cuisine of cuisineRequirements) {
+    const hasCuisine = [...plan.assignments.values()].some((r) => {
+      const norm = r.norm;
+      const sel = r.sel;
+      return (
+        (norm.cuisine?.toLowerCase().includes(cuisine)) ||
+        norm.title.toLowerCase().includes(cuisine) ||
+        sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))
+      );
+    });
+
+    if (!hasCuisine) {
+      let swapped = false;
+      for (const [slot, candidates] of candidatesBySlot) {
+        const cuisineCandidate = candidates.find((c) => {
+          const norm = c.recipe.norm;
+          const sel = c.recipe.sel;
+          return (
+            !plan.usedIds.has(norm.id) &&
+            (
+              (norm.cuisine?.toLowerCase().includes(cuisine)) ||
+              norm.title.toLowerCase().includes(cuisine) ||
+              sel.tags.some((tag) => tag.toLowerCase().includes(cuisine))
+            )
+          );
+        });
+        if (cuisineCandidate) {
+          const overallLowest = [...plan.assignments.entries()]
+            .map(([s, r]) => ({ slot: s, recipe: r }))
+            .sort((a, b) => {
+              const sa = candidatesBySlot.get(a.slot)?.find((c) => c.recipe.norm.id === a.recipe.norm.id)?.score.score ?? 0;
+              const sb = candidatesBySlot.get(b.slot)?.find((c) => c.recipe.norm.id === b.recipe.norm.id)?.score.score ?? 0;
+              return sa - sb;
+            })[0];
+
+          const targetSlot = overallLowest?.slot ?? slot;
+          const removedId = plan.assignments.get(targetSlot)?.norm.id;
+
+          plan = clonePartialPlan(plan);
+          plan.assignments.set(targetSlot, cuisineCandidate.recipe);
+          if (removedId) plan.usedIds.delete(removedId);
+          plan.usedIds.add(cuisineCandidate.recipe.norm.id);
+          swapped = true;
+          break;
+        }
+      }
+      if (!swapped) {
+        warnings.push(
+          `Cuisine requirement "${cuisine}": no ${cuisine} recipes found in any candidate pool. ` +
+          'The plan was built without this cuisine.'
+        );
+      }
+    }
+  }
+
   return { plan, warnings };
 }
 

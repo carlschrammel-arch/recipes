@@ -64,6 +64,26 @@ export async function loadEnrichmentCache(
       try {
         const record = JSON.parse(trimmed) as EnrichmentRecord;
         if (record.recipe_id && record.schema_version === SCHEMA_VERSION) {
+          // Validate macro plausibility — AI sometimes returns whole-recipe values instead of per-serving
+          const m = record.metadata;
+          if (m.estimated_protein_g != null && m.estimated_protein_g > 150) m.estimated_protein_g = null;
+          if (m.estimated_carbs_g != null && m.estimated_carbs_g > 200) m.estimated_carbs_g = null;
+          if (m.estimated_fat_g != null && m.estimated_fat_g > 120) m.estimated_fat_g = null;
+          // If macros and calories are all set but don't add up (within 50%), null the macros
+          if (
+            m.estimated_calories != null &&
+            m.estimated_protein_g != null &&
+            m.estimated_carbs_g != null &&
+            m.estimated_fat_g != null
+          ) {
+            const macroKcal =
+              m.estimated_protein_g * 4 + m.estimated_carbs_g * 4 + m.estimated_fat_g * 9;
+            if (Math.abs(macroKcal - m.estimated_calories) > m.estimated_calories * 0.5) {
+              m.estimated_protein_g = null;
+              m.estimated_carbs_g = null;
+              m.estimated_fat_g = null;
+            }
+          }
           records.set(record.recipe_id, record); // Later entries overwrite earlier ones
         }
       } catch {
@@ -383,6 +403,13 @@ export function applyEnrichmentForSoftScoring(
         fat_g: m.estimated_fat_g ?? enriched.nutrition?.fat_g ?? null,
         sodium_mg: enriched.nutrition?.sodium_mg ?? null,
       };
+      // Apply plausibility bounds to the merged result — catches both implausible
+      // AI estimates (already filtered in loadEnrichmentCache) and implausible
+      // source data (e.g., whole-recipe macros instead of per-serving).
+      const n = enriched.nutrition;
+      if (n.protein_g != null && n.protein_g > 150) n.protein_g = null;
+      if (n.carbs_g != null && n.carbs_g > 200) n.carbs_g = null;
+      if (n.fat_g != null && n.fat_g > 120) n.fat_g = null;
     }
   }
 

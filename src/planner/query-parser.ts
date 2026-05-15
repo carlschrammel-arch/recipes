@@ -40,22 +40,23 @@ const WeeklyPlanRequestSchema = z.object({
     .nullable()
     .optional(),
   goals: z.object({
-    weightLoss: z.boolean().optional(),
-    highProtein: z.boolean().optional(),
-    lowFat: z.boolean().optional(),
-    quickEasy: z.boolean().optional(),
-    lowMediumCost: z.boolean().optional(),
-    freezerFriendly: z.boolean().optional(),
-    lowWaste: z.boolean().optional(),
-    lowTransFat: z.boolean().optional(),
-    limitedSaturatedFat: z.boolean().optional(),
-    healthyFats: z.boolean().optional(),
-    varietyOfFlavors: z.boolean().optional(),
+    // Accept null from AI responses (AI returns null for unmentioned booleans) and coerce to false
+    weightLoss: z.boolean().nullable().optional().transform((v) => v ?? false),
+    highProtein: z.boolean().nullable().optional().transform((v) => v ?? false),
+    lowFat: z.boolean().nullable().optional().transform((v) => v ?? false),
+    quickEasy: z.boolean().nullable().optional().transform((v) => v ?? false),
+    lowMediumCost: z.boolean().nullable().optional().transform((v) => v ?? false),
+    freezerFriendly: z.boolean().nullable().optional().transform((v) => v ?? false),
+    lowWaste: z.boolean().nullable().optional().transform((v) => v ?? false),
+    lowTransFat: z.boolean().nullable().optional().transform((v) => v ?? false),
+    limitedSaturatedFat: z.boolean().nullable().optional().transform((v) => v ?? false),
+    healthyFats: z.boolean().nullable().optional().transform((v) => v ?? false),
+    varietyOfFlavors: z.boolean().nullable().optional().transform((v) => v ?? false),
   }),
   preferredIngredients: z.array(z.string()),
   requiredSourceSignals: z.array(z.string()).nullable().optional(),
   requiredTagsOrTitleTerms: z.array(z.string()).nullable().optional(),
-  allowComfortFood: z.boolean().optional(),
+  allowComfortFood: z.boolean().nullable().optional().transform((v) => v ?? false),
   maxResults: z.number().int().min(1).nullable().optional(),
 });
 
@@ -93,7 +94,7 @@ JSON schema:
   },
   "preferredIngredients": string[],
   "requiredSourceSignals": string[]|null  (e.g. ["hellofresh"] if ≥1 HelloFresh recipe required),
-  "requiredTagsOrTitleTerms": string[]|null (e.g. ["pasta"] if ≥1 pasta recipe required),
+  "requiredTagsOrTitleTerms": string[]|null (e.g. ["pasta"] if ≥1 pasta recipe required; use "cuisine:mexican" if ≥1 Mexican recipe required),
   "allowComfortFood": boolean,
   "maxResults": number|null
 }
@@ -107,6 +108,9 @@ Flex meal rule:
 Other rules:
 - "at least one HelloFresh" → requiredSourceSignals: ["hellofresh"]
 - "at least one pasta" → requiredTagsOrTitleTerms: ["pasta"]
+- "1 mexican" / "one mexican recipe" / "a mexican meal" → requiredTagsOrTitleTerms: ["cuisine:mexican"]
+- "1 italian" → requiredTagsOrTitleTerms: ["cuisine:italian"] (and so on for other cuisines)
+- Cuisine terms go in requiredTagsOrTitleTerms as "cuisine:<name>"; they do NOT become protein slots
 - "comfort food" → allowComfortFood: true
 - "freeze and reheat" / "meal prep" → goals.freezerFriendly: true
 - "low waste" / "ingredient overlap" → goals.lowWaste: true
@@ -116,6 +120,7 @@ Other rules:
 - "promotes weight loss" → goals.weightLoss: true
 - "higher protein" / "high protein" → goals.highProtein: true
 - "lower fat" / "low fat" → goals.lowFat: true
+- "low calorie" / "low cal" / "lower calorie" → goals.highProtein: true AND goals.lowFat: true (NOT a calorie count target — portion size is always adjustable, so focus on macro quality)
 - "easy and quick" / "weeknight" → goals.quickEasy: true
 - "low to medium priced" / "budget" → goals.lowMediumCost: true
 - "variety of flavors" → goals.varietyOfFlavors: true
@@ -165,7 +170,7 @@ export async function parsePlanRequestWithAI(
     const result = WeeklyPlanRequestSchema.safeParse(parsed);
     if (!result.success) {
       const issues = result.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-      warnings.push(`AI response failed schema validation (${issues}). Using offline parser.`);
+      warnings.push(`AI query parsing fell back to offline parser (schema mismatch: ${issues}).`);
       return {
         request: parsePlanRequestOffline(query),
         usedFallback: true,
@@ -275,10 +280,15 @@ export function parsePlanRequestOffline(query: string): WeeklyPlanRequest {
       : undefined;
 
   // --- Goals ---
+  // Note: "low calorie" is treated as a macro-quality goal rather than an absolute
+  // calorie target. Since any recipe can be divided into smaller portions, the calorie
+  // count per listed serving is irrelevant — what matters is nutritional composition.
+  // So "low calorie" → highProtein + lowFat (good macro ratios / protein density).
+  const lowCalorieTerm = /\blow[\s-]?cal(?:orie)?s?\b/i.test(q);
   const goals: WeeklyPlanRequest['goals'] = {
     weightLoss: /weight\s*loss|promot(?:e|es|ing)\s+weight/i.test(q),
-    highProtein: /high(?:er)?\s*protein/i.test(q),
-    lowFat: /low(?:er)?\s*fat/i.test(q),
+    highProtein: /high(?:er)?\s*protein/i.test(q) || lowCalorieTerm,
+    lowFat: /low(?:er)?\s*fat/i.test(q) || lowCalorieTerm,
     quickEasy: /\b(?:easy|quick|weeknight|fast)\b/i.test(q),
     lowMediumCost: /\b(?:low|medium)\s+(?:price|priced|cost|budget)\b/i.test(q),
     freezerFriendly: /\b(?:freeze|freezer|reheat|meal\s*prep)\b/i.test(q),
@@ -309,6 +319,24 @@ export function parsePlanRequestOffline(query: string): WeeklyPlanRequest {
   const requiredTagsOrTitleTerms: string[] = [];
   if (/\bat\s+least\s+one\s+(?:recipe\s+)?(?:has|with|contains?)\s+pasta\b|\bpasta\s+(?:recipe|dish|meal)\b|\bone\s+(?:meal|recipe)\s+(?:can\s+)?(?:be|is)\s+pasta\b/i.test(q)) {
     requiredTagsOrTitleTerms.push('pasta');
+  }
+
+  // --- Cuisine requirements (e.g. "1 mexican", "one italian meal") ---
+  const CUISINE_TERMS = [
+    'mexican', 'italian', 'asian', 'thai', 'chinese', 'japanese', 'indian',
+    'mediterranean', 'korean', 'french', 'greek', 'american', 'spanish',
+    'middle eastern', 'moroccan', 'vietnamese', 'tex-mex', 'cajun',
+  ];
+  for (const cuisine of CUISINE_TERMS) {
+    // Match "1 mexican", "one mexican", "a mexican (meal|recipe|dish)", "mexican recipe"
+    const escaped = cuisine.replace(/-/g, '[\\s-]');
+    const re = new RegExp(
+      `(?:\\b(?:1|one|a|an)\\s+${escaped}\\b|\\b${escaped}\\s+(?:meal|recipe|dish|food)\\b)`,
+      'i'
+    );
+    if (re.test(q)) {
+      requiredTagsOrTitleTerms.push(`cuisine:${cuisine}`);
+    }
   }
 
   // --- Comfort food ---

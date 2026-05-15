@@ -30,6 +30,7 @@ const UNIT_PATTERNS: Array<{ pattern: RegExp; normalized: string }> = [
   { pattern: /\b(pieces?|pcs?\.?)\b/i, normalized: 'piece' },
   { pattern: /\b(stalks?)\b/i, normalized: 'stalk' },
   { pattern: /\b(sprigs?)\b/i, normalized: 'sprig' },
+  { pattern: /\b(unit)\b/i, normalized: 'unit' },  // HelloFresh uses "1 unit Tomato"
   { pattern: /\b(large|lg\.?)\b/i, normalized: 'large' },
   { pattern: /\b(medium|med\.?)\b/i, normalized: 'medium' },
   { pattern: /\b(small|sm\.?)\b/i, normalized: 'small' },
@@ -183,6 +184,7 @@ function parseQuantity(text: string): { value: number; consumed: number } | null
 function cleanIngredientName(name: string): string {
   return name
     .replace(/^[-–—•*.]+\s*/, '')  // Remove leading bullets and stray punctuation (e.g. period left by "oz.")
+    .replace(/^unit\s+/i, '')          // Strip leading "unit" that slipped through parsing (HelloFresh quirk)
     .replace(/\s+/g, ' ')          // Normalize whitespace
     .replace(/^(the|some|a|an)\s+/i, '')  // Remove articles
     .trim();

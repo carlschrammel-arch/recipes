@@ -103,6 +103,16 @@ export async function loadPlannerData(dataPath: string): Promise<PlannerDataFile
     normalizedList.map((r) => [r.id, r])
   );
 
+  // Validate macro plausibility in source data — some recipe sources store
+  // whole-recipe totals rather than per-serving values.
+  for (const recipe of normalizedById.values()) {
+    const n = recipe.nutrition;
+    if (!n) continue;
+    if (n.protein_g != null && n.protein_g > 150) n.protein_g = null;
+    if (n.carbs_g != null && n.carbs_g > 200) n.carbs_g = null;
+    if (n.fat_g != null && n.fat_g > 120) n.fat_g = null;
+  }
+
   return { selectionRecords, normalizedById };
 }
 

@@ -69,6 +69,11 @@ function formatNutritionLines(recipe: NormalizedRecipe): string[] {
       `${macros.carbsPct!.toFixed(1)}% carbs · ` +
       `${macros.fatPct!.toFixed(1)}% fat`
     );
+    // Protein density — useful when comparing recipes across different calorie levels
+    if (n.protein_g != null && n.calories != null && n.calories > 0) {
+      const density = (n.protein_g / n.calories) * 100;
+      lines.push(`Protein density: ${density.toFixed(1)}g protein per 100 kcal`);
+    }
   } else if (missingParts.length > 0) {
     lines.push(`Macros: not evaluated — missing ${missingParts.join(' and ')}`);
   }
@@ -184,9 +189,13 @@ export function renderPlanAsMarkdown(
     (r) => r.nutrition?.protein_g != null && r.nutrition?.carbs_g != null && r.nutrition?.fat_g != null
   );
   const withCalories = selectedRecipes.filter((r) => r.nutrition?.calories != null);
+  const withProteinAndCalories = selectedRecipes.filter(
+    (r) => r.nutrition?.protein_g != null && r.nutrition?.calories != null && r.nutrition.calories > 0
+  );
 
   if (withCalories.length > 0 || withAllMacros.length > 0) {
     lines.push('### Average Nutrition Per Recipe\n');
+    lines.push('_Calories shown per listed serving. Divide any recipe to adjust portion size — macro ratios stay the same regardless of how much you eat._\n');
 
     const dataCount = Math.max(withCalories.length, withAllMacros.length);
     if (dataCount < selectedRecipes.length) {
@@ -195,7 +204,13 @@ export function renderPlanAsMarkdown(
 
     if (withCalories.length > 0) {
       const avgCal = withCalories.reduce((a, r) => a + r.nutrition!.calories!, 0) / withCalories.length;
-      lines.push(`- Avg calories: **${Math.round(avgCal)} kcal**`);
+      const minCal = Math.min(...withCalories.map((r) => r.nutrition!.calories!));
+      const maxCal = Math.max(...withCalories.map((r) => r.nutrition!.calories!));
+      if (minCal !== maxCal) {
+        lines.push(`- Avg calories: **${Math.round(avgCal)} kcal** (range: ${Math.round(minCal)}–${Math.round(maxCal)} kcal per listed serving)`);
+      } else {
+        lines.push(`- Avg calories: **${Math.round(avgCal)} kcal** per listed serving`);
+      }
     }
 
     if (withAllMacros.length > 0) {
@@ -219,10 +234,22 @@ export function renderPlanAsMarkdown(
     } else {
       lines.push('- Macro % averages: _not available (macro gram data missing from most recipes)_');
     }
+
+    // Protein density — key nutritional quality metric that's portion-size-independent
+    if (withProteinAndCalories.length > 0) {
+      const avgDensity =
+        withProteinAndCalories.reduce(
+          (a, r) => a + (r.nutrition!.protein_g! / r.nutrition!.calories!) * 100,
+          0
+        ) / withProteinAndCalories.length;
+      lines.push(`- Avg protein density: **${avgDensity.toFixed(1)}g protein per 100 kcal** _(portion-size-independent quality signal)_`);
+    }
+
     lines.push('');
   } else {
     lines.push('_Nutrition data not available for the selected recipes._\n');
   }
+
 
   // ---- Recipe cards ----
   lines.push('---\n');
@@ -351,6 +378,21 @@ export function renderPlanAsMarkdown(
       r.ingredients.some((i) => i.ingredient.toLowerCase().includes('pasta'))
     );
     lines.push(`| ≥1 pasta recipe | ${hasPasta ? '✅' : '❌'} | ${hasPasta ? 'Satisfied' : 'No pasta recipe in pool'} |`);
+  }
+
+  // Cuisine requirements
+  const cuisineRequirements = (request.requiredTagsOrTitleTerms ?? [])
+    .filter((t) => t.startsWith('cuisine:'))
+    .map((t) => t.slice('cuisine:'.length));
+  for (const cuisine of cuisineRequirements) {
+    const match = selectedRecipes.find((r) =>
+      (r.cuisine?.toLowerCase().includes(cuisine)) ||
+      r.title.toLowerCase().includes(cuisine) ||
+      r.tags.some((tag) => tag.toLowerCase().includes(cuisine))
+    );
+    lines.push(
+      `| ≥1 ${cuisine} recipe | ${match ? '✅' : '❌'} | ${match ? match.title : `No ${cuisine} recipe found`} |`
+    );
   }
 
   // Macro targets

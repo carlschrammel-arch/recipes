@@ -96,7 +96,10 @@ const INGREDIENT_NORMALIZATIONS: [RegExp, string][] = [
  */
 export function canonicalIngredientKey(ingredientName: string): string {
   // Strip leading non-alphanumeric chars (e.g. ". white rice" from "oz." unit abbreviation)
-  const lower = ingredientName.toLowerCase().trim().replace(/^[^a-z0-9]+/, '');
+  // Also strip "unit " that leaked through HelloFresh ingredient parsing
+  const lower = ingredientName.toLowerCase().trim()
+    .replace(/^[^a-z0-9]+/, '')
+    .replace(/^unit\s+/, '');
 
   for (const [pattern, canonical] of INGREDIENT_NORMALIZATIONS) {
     if (pattern.test(lower)) return canonical;
@@ -144,7 +147,9 @@ const W = {
    * These are multiplied by macroImportance (1x or 2x) based on active goals.
    */
   macroFit: { protein: 1.2, carbs: 0.8, fat: 1.2 },
-  weightLoss: { calRange: 0.5, protPct: 0.3, fatPct: 0.2 },
+  // calRange removed — calories can always be adjusted by eating a smaller portion;
+  // macro ratios and protein density are the meaningful quality signals.
+  weightLoss: { proteinDensity: 0.5, protPct: 0.3, fatPct: 0.2 },
   highProtein: 1.5,
   lowFat: 1.5,
   kidFriendly: { required: 1.0, bonus: 0.3 },
@@ -263,19 +268,25 @@ export function scoreRecipeForRequest(
   }
 
   // ---------- Weight loss ----------
+  // We do NOT score on absolute calorie counts — since any recipe can be divided
+  // into a smaller portion, calories per listed serving are irrelevant. What matters
+  // is macro composition: high protein %, low fat %, and protein-per-calorie density.
   if (request.goals.weightLoss) {
     let wlScore = 0;
 
-    if (sel.calories !== null) {
-      if (sel.calories >= 350 && sel.calories <= 650) {
-        wlScore += W.weightLoss.calRange;
-      } else if (sel.calories < 350) {
-        wlScore += W.weightLoss.calRange * 0.6; // Very low-cal: ok but not ideal
-      } else if (sel.calories <= 800) {
-        wlScore += W.weightLoss.calRange * 0.3;
-      }
+    // Protein density: score recipes by how much protein they deliver per calorie.
+    // A recipe with 30g protein / 500 kcal = 6g/100kcal is better than 10g / 200kcal = 5g/100kcal.
+    // Scale: ≥8g protein per 100 kcal → full score; below 4g → no bonus.
+    if (sel.protein_g !== null && sel.calories !== null && sel.calories > 0) {
+      const proteinPer100kcal = (sel.protein_g / sel.calories) * 100;
+      const densityScore = Math.min(Math.max((proteinPer100kcal - 4) / 4, 0), 1.0);
+      wlScore += densityScore * W.weightLoss.proteinDensity;
+    } else if (sel.macro_pct_protein !== null) {
+      // Fall back to macro % when gram data is absent
+      const approxDensityScore = Math.min(Math.max((sel.macro_pct_protein - 20) / 15, 0), 1.0);
+      wlScore += approxDensityScore * W.weightLoss.proteinDensity * 0.7;
     } else {
-      missingNutritionSet.add('calories');
+      missingNutritionSet.add('protein_density');
     }
 
     if (sel.macro_pct_protein !== null && sel.macro_pct_protein >= 25) {
