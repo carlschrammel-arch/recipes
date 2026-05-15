@@ -481,16 +481,28 @@ export function renderPlanAsMarkdown(
     if (e.apiKeyMissing) {
       lines.push('_Enrichment skipped: no OpenAI API key found. Using local data and cached enrichment only._');
     } else if (e.recipesEnriched > 0 || e.recipesFromCache > 0) {
+      // Use the correct label based on mode
+      const recipeLabel = e.mode === 'candidates' ? 'candidate' : 'selected';
+
       if (e.recipesEnriched > 0) {
         const n = e.recipesEnriched;
-        lines.push(`Enrichment: ${n} selected ${n === 1 ? 'recipe' : 'recipes'} enriched automatically and cached.`);
+        lines.push(`Enrichment: ${n} ${recipeLabel} ${n === 1 ? 'recipe' : 'recipes'} enriched automatically and cached.`);
       }
       if (e.recipesFromCache > 0) {
         const n = e.recipesFromCache;
-        lines.push(`${n} ${n === 1 ? 'recipe' : 'recipes'} loaded from enrichment cache (no new API calls).`);
+        lines.push(`${n} ${recipeLabel} ${n === 1 ? 'recipe' : 'recipes'} loaded from enrichment cache (no new API calls).`);
       }
-      if (e.estimatedFields.length > 0) {
-        lines.push(`Estimated metadata was used for: ${e.estimatedFields.join(', ')}.`);
+
+      // Separate nutrition fields from other estimated fields
+      const nutritionFieldKeys = new Set(['protein_g', 'carbs_g', 'fat_g', 'calories', 'protein_pct', 'carbs_pct', 'fat_pct']);
+      const nutritionFields = e.estimatedFields.filter((f) => nutritionFieldKeys.has(f));
+      const otherFields = e.estimatedFields.filter((f) => !nutritionFieldKeys.has(f));
+
+      if (nutritionFields.length > 0) {
+        lines.push('Estimated nutrition was available for soft scoring only.');
+      }
+      if (otherFields.length > 0) {
+        lines.push(`Estimated metadata used for soft scoring: ${otherFields.join(', ')}.`);
       }
       lines.push('_Estimated nutrition was not used for strict macro validation._');
       if (e.limitReached) {
@@ -500,6 +512,19 @@ export function renderPlanAsMarkdown(
       lines.push('_No recipes needed enrichment (all metadata present or no candidates eligible)._');
     }
     lines.push('');
+  }
+
+  // ---- Selected-despite-warnings ----
+  if (result.selectedDespiteWarnings && result.selectedDespiteWarnings.length > 0) {
+    lines.push('## ⚠️ Weak-Fit Selections\n');
+    lines.push('_These recipes were selected despite not being an ideal fit for your goals:_\n');
+    for (const item of result.selectedDespiteWarnings) {
+      lines.push(`**${item.title}**`);
+      for (const reason of item.reasons) {
+        lines.push(`- ${reason}`);
+      }
+      lines.push('');
+    }
   }
 
   // ---- Footer ----

@@ -418,7 +418,9 @@ program
   .option('--max-candidates <n>', 'Max candidates per slot for beam search (default: 75)', parseInt, 75)
   .option('--no-ai-parser', 'Use offline regex parser only (no OpenAI API call for query parsing)')
   .option('--explain', 'Ask AI to write a brief explanation of the selected plan')
-  .option('--no-history', 'Ignore past suggestions — include all recipes this run (does not update history)')
+  .option('--save-history', 'Save selected recipes to history (excludes them from future plans)')
+  .option('--exclude-history', 'Exclude previously-suggested recipes from this plan')
+  .option('--no-history', 'Alias for: do not use or update history (legacy, use --exclude-history / --save-history)')
   .option('--auto-enrich', 'Enrich candidate recipes before scoring (calls OpenAI for missing metadata)')
   .option('--auto-enrich-selected', 'Enrich only selected recipes after initial plan, then re-score (default)')
   .option('--no-auto-enrich', 'Never call OpenAI for enrichment during planning')
@@ -481,7 +483,8 @@ Environment:
         maxCandidatesPerSlot: options.maxCandidates,
         noAiParser: options['no-ai-parser'],
         explain: options.explain,
-        skipHistory: !options['no-history'],
+        excludeHistory: options['exclude-history'] ?? options['no-history'] ?? false,
+        saveHistory: options['save-history'] ?? false,
         autoEnrich,
         enrichmentLimit: options.enrichmentLimit ?? 20,
         useEstimatedMacrosForSoftScoring: true,
@@ -523,25 +526,38 @@ Environment:
         console.log(output.aiExplanation);
       }
 
-      // Validation summary
+      // Validation summary — structural and nutrition are separate
       const { validation } = output.result;
-      if (!validation.hardConstraintsSatisfied) {
-        console.log(chalk.yellow('\n⚠ Some constraints could not be fully satisfied.'));
-        for (const fc of validation.failedConstraints) {
+      if (!validation.structuralConstraintsSatisfied) {
+        console.log(chalk.yellow('\n⚠ Structural constraints not fully satisfied:'));
+        for (const fc of validation.failedConstraints.filter((c) => !c.startsWith('nutrition_target:'))) {
           console.log(chalk.dim(`  • ${fc}`));
         }
       } else {
-        console.log(chalk.green('\n✅ All hard constraints satisfied.'));
+        console.log(chalk.green('\n✅ Structural constraints satisfied.'));
+      }
+
+      const { nutritionEvaluationStatus } = validation;
+      if (nutritionEvaluationStatus === 'met') {
+        console.log(chalk.green('✅ Macro targets met.'));
+      } else if (nutritionEvaluationStatus === 'failed') {
+        console.log(chalk.red('❌ Macro targets not met by available real nutrition data.'));
+        for (const fc of validation.failedConstraints.filter((c) => c.startsWith('nutrition_target:'))) {
+          console.log(chalk.dim(`  • ${fc.replace('nutrition_target:', '')}`));
+        }
+      } else if (nutritionEvaluationStatus === 'partial') {
+        console.log(chalk.yellow('⚠️  Nutrition targets partially evaluated — limited macro data available.'));
       }
 
       console.log(chalk.dim(`\nPlan score: ${output.result.planScore.toFixed(2)}`));
       console.log(chalk.dim(`Recipes: ${output.result.selectedRecipes.length} selected from local catalog`));
-      if (!options['no-history']) {
-        console.log(chalk.dim('These recipes have been saved to history and will be excluded from future plans.'));
-        console.log(chalk.dim('Run "recipe-context history" to review or remove entries.\n'));
+      if (options['save-history']) {
+        console.log(chalk.dim('Saved to history. These recipes will be excluded from future plans unless you run --include-history.'));
+        console.log(chalk.dim('Run "recipe-context history" to review or remove entries.'));
       } else {
-        console.log();
+        console.log(chalk.dim('History not updated. Use --save-history to exclude these from future plans.'));
       }
+      console.log();
 
     } catch (err) {
       spinner.fail('Plan failed');

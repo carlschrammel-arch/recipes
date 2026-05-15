@@ -180,7 +180,14 @@ export interface PlanOptions {
   noAiParser?: boolean;
   /** Call AI to explain the final plan (requires API key). */
   explain?: boolean;
-  /** If true, previously-suggested recipes are excluded from this plan (default: true). */
+  /** If true, previously-suggested recipes are excluded from this plan (default: false). */
+  excludeHistory?: boolean;
+  /** If true, save selected recipes to history after planning (default: false). */
+  saveHistory?: boolean;
+  /**
+   * @deprecated Use excludeHistory + saveHistory separately.
+   * When true, behaves as excludeHistory=true and saveHistory=true.
+   */
   skipHistory?: boolean;
   /**
    * Auto-enrichment mode:
@@ -221,10 +228,11 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
   // --- Load data ---
   const { selectionRecords: allSelectionRecords, normalizedById } = await loadPlannerData(options.dataPath);
 
-  // --- Filter previously-suggested recipes (unless caller opts out) ---
-  const skipHistory = options.skipHistory ?? true;
+  // --- Filter previously-suggested recipes (when exclude-history is requested) ---
+  const excludeHistory = options.excludeHistory ?? options.skipHistory ?? false;
+  const saveHistoryFlag = options.saveHistory ?? options.skipHistory ?? false;
   let selectionRecords = allSelectionRecords;
-  if (skipHistory) {
+  if (excludeHistory) {
     const excludedIds = await getExcludedIds(options.dataPath);
     if (excludedIds.size > 0) {
       selectionRecords = allSelectionRecords.filter((r) => !excludedIds.has(r.id));
@@ -405,8 +413,8 @@ export async function planRecipes(query: string, options: PlanOptions): Promise<
     });
   }
 
-  // --- Save suggested recipes to history ---
-  if (skipHistory) {
+  // --- Save suggested recipes to history (only when explicitly requested) ---
+  if (saveHistoryFlag) {
     await appendToHistory(options.dataPath, result.selectedRecipes);
   }
 

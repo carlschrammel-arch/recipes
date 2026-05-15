@@ -41,7 +41,16 @@ const VARIETY_BONUS_PER_CUISINE = 0.10; // Per novel cuisine added to plan
 const MAX_OVERLAP_BONUS = 2.0;
 const MAX_VARIETY_BONUS = 1.0;
 
-/** Waste risk constants (replaced by ingredient classification below). */
+// ============================================================================
+// Recipe format helpers
+// ============================================================================
+
+/** Detect creamy pasta format (heavy cream/cream cheese + pasta). */
+function isCreamyPasta(recipe: PlannerRecipe): boolean {
+  if (!recipe.sel.is_pasta) return false;
+  const ingText = recipe.norm.ingredients.map((i) => i.original.toLowerCase()).join(' ');
+  return /heavy cream|cream cheese|cream sauce|alfredo|bechamel|b[eé]chamel|white sauce/.test(ingText);
+}
 
 // ============================================================================
 // Helpers
@@ -209,21 +218,23 @@ function enforceRequiredSingletons(
  */
 const PANTRY_INGREDIENT_KEYS = new Set([
   'olive oil', 'vegetable oil', 'canola oil', 'cooking oil', 'salt', 'black pepper',
-  'white pepper', 'water', 'sugar', 'flour', 'bread crumbs', 'panko',
+  'pepper', 'white pepper', 'water', 'sugar', 'flour', 'bread crumbs', 'panko',
   'vinegar', 'mustard', 'cumin', 'paprika', 'oregano', 'bay leaves',
   'thyme', 'rosemary', 'chili flakes', 'dried pasta', 'rice', 'white rice',
   'brown rice', 'corn starch', 'baking powder', 'baking soda',
+  // Common kitchen staples that virtually everyone stocks — not meaningful grocery items
+  'garlic', 'onion', 'butter', 'soy sauce', 'hot sauce', 'tomato paste',
+  'honey', 'chicken broth', 'beef broth', 'vegetable broth',
 ]);
 
 /**
- * Fridge staples — need to buy but last weeks and low waste risk.
- * Shown in main list with lower weight.
+ * Fridge items that are worth buying once for multiple recipes but low individual waste.
+ * Shown in main list at reduced weight — they're useful to call out but not critical.
  */
 const FRIDGE_STAPLE_KEYS = new Set([
-  'garlic', 'onion', 'red onion', 'butter', 'eggs', 'soy sauce', 'fish sauce',
-  'hot sauce', 'coconut milk', 'tomato paste', 'honey', 'chicken broth',
-  'beef broth', 'vegetable broth', 'canned tomatoes', 'black beans',
-  'chickpeas', 'lentils', 'salsa', 'cheese',
+  'red onion', 'eggs', 'fish sauce', 'coconut milk',
+  'canned tomatoes', 'black beans', 'chickpeas', 'lentils', 'salsa', 'cheese',
+  'parmesan cheese', 'mozzarella',
 ]);
 
 /**
@@ -306,7 +317,7 @@ function computeShoppingOverlap(
   ).length;
   if (meaningfulShared > 0) {
     notes.push(
-      `${meaningfulShared} perishable/specialty ingredient${meaningfulShared > 1 ? 's' : ''} shared across recipes — fewer wasted groceries.`
+      `${meaningfulShared} meaningful shared ingredient${meaningfulShared > 1 ? 's' : ''} across recipes — fewer wasted groceries.`
     );
   } else if (sharedIngredients.length > 0) {
     notes.push(
@@ -410,13 +421,22 @@ function computePlanLevelScore(
   if (request.goals.varietyOfFlavors) {
     let varietyPenalty = 0;
 
-    // Pasta repetition: if user requested pasta AND wants variety, penalize >1 pasta
     const pastaCount = selectedRecipes.filter((r) => r.sel.is_pasta).length;
-    if (request.requiredTagsOrTitleTerms?.includes('pasta') && pastaCount > 1) {
-      varietyPenalty += (pastaCount - 1) * 0.5;
-    } else if (!request.requiredTagsOrTitleTerms?.includes('pasta') && pastaCount > 1) {
-      // Penalize even when pasta wasn't explicitly requested but shows up repeatedly
-      varietyPenalty += (pastaCount - 1) * 0.3;
+    const creamyPastaCount = selectedRecipes.filter(isCreamyPasta).length;
+
+    // Pasta repetition: one pasta is fine (even required), but more is penalized
+    if (pastaCount > 1) {
+      varietyPenalty += (pastaCount - 1) * 1.0; // was 0.5 — stronger now
+    }
+
+    // Extra penalty for repeated creamy pasta specifically
+    if (creamyPastaCount > 1) {
+      varietyPenalty += (creamyPastaCount - 1) * 0.8;
+    }
+
+    // Creamy pasta is particularly incompatible with weight-loss / low-fat goals
+    if ((request.goals.weightLoss || request.goals.lowFat) && creamyPastaCount > 0) {
+      varietyPenalty += creamyPastaCount * 0.5;
     }
 
     // Cuisine repetition: penalize >2 recipes from the same cuisine
@@ -491,6 +511,87 @@ function computeAlternatives(
   }
 
   return alternatives;
+}
+
+// ============================================================================
+// Selected-despite-warnings diagnostics
+// ============================================================================
+
+/**
+ * Identify selected recipes that are a notably poor fit for the requested goals.
+ * Used for transparency — tells users why a weak recipe was still picked.
+ */
+function computeSelectedDespiteWarnings(
+  plan: PartialPlan,
+  candidatesBySlot: Map<string, Array<{ recipe: PlannerRecipe; score: CandidateScore }>>,
+  request: WeeklyPlanRequest,
+  selectedRecipes: NormalizedRecipe[]
+): Array<{ recipeId: string; title: string; reasons: string[] }> {
+  const result: Array<{ recipeId: string; title: string; reasons: string[] }> = [];
+
+  const recipeMap = new Map<string, PlannerRecipe>();
+  for (const [, recipe] of plan.assignments) {
+    recipeMap.set(recipe.norm.id, recipe);
+  }
+
+  for (const norm of selectedRecipes) {
+    const plannerRecipe = recipeMap.get(norm.id);
+    if (!plannerRecipe) continue;
+    const { sel } = plannerRecipe;
+    const reasons: string[] = [];
+
+    // Macro fit warnings when targets were requested
+    if (request.macroTargets) {
+      const { fatPct, proteinPct, carbsPct } = request.macroTargets;
+
+      if (fatPct?.maxPct !== undefined && sel.macro_pct_fat !== null) {
+        const miss = sel.macro_pct_fat - fatPct.maxPct;
+        if (miss > 10) {
+          reasons.push(
+            `fat ${sel.macro_pct_fat.toFixed(1)}% is far above requested max ${fatPct.maxPct}%`
+          );
+        }
+      }
+      if (fatPct?.minPct !== undefined && sel.macro_pct_fat !== null) {
+        const miss = fatPct.minPct - sel.macro_pct_fat;
+        if (miss > 5) {
+          reasons.push(
+            `fat ${sel.macro_pct_fat.toFixed(1)}% is below requested min ${fatPct.minPct}%`
+          );
+        }
+      }
+      if (proteinPct?.minPct !== undefined && sel.macro_pct_protein !== null) {
+        const miss = proteinPct.minPct - sel.macro_pct_protein;
+        if (miss > 8) {
+          reasons.push(
+            `protein ${sel.macro_pct_protein.toFixed(1)}% is below requested min ${proteinPct.minPct}%`
+          );
+        }
+      }
+      if (carbsPct?.minPct !== undefined && sel.macro_pct_carbs !== null) {
+        const miss = carbsPct.minPct - sel.macro_pct_carbs;
+        if (miss > 10) {
+          reasons.push(
+            `carbs ${sel.macro_pct_carbs.toFixed(1)}% is below requested min ${carbsPct.minPct}%`
+          );
+        }
+      }
+    }
+
+    // Creamy pasta under weight-loss goals
+    if (
+      (request.goals.weightLoss || request.goals.lowFat) &&
+      isCreamyPasta(plannerRecipe)
+    ) {
+      reasons.push('creamy pasta is a poor fit for weight-loss / low-fat goals');
+    }
+
+    if (reasons.length > 0) {
+      result.push({ recipeId: norm.id, title: norm.title, reasons });
+    }
+  }
+
+  return result;
 }
 
 // ============================================================================
@@ -600,6 +701,40 @@ export function buildWeeklyPlan(
   );
   bestPlan = finalPlan;
 
+  // --- 4b. Flex deduplication: if the flex slot has pasta and pasta is already
+  //         satisfied by a required slot, try to swap it for a non-pasta alternative
+  //         when variety is requested. ---
+  if (
+    (request.flexMealCount ?? 0) > 0 &&
+    request.goals.varietyOfFlavors &&
+    request.requiredTagsOrTitleTerms?.includes('pasta')
+  ) {
+    const slotKeys = [...bestPlan.assignments.keys()];
+    const flexSlotKeys = slotKeys.filter((s) => s === 'flex' || s.startsWith('flex'));
+    const nonFlexSlotKeys = slotKeys.filter((s) => s !== 'flex' && !s.startsWith('flex'));
+    const pastaInRequired = nonFlexSlotKeys.some((s) => bestPlan.assignments.get(s)?.sel.is_pasta);
+
+    if (pastaInRequired) {
+      for (const flexKey of flexSlotKeys) {
+        const currentFlex = bestPlan.assignments.get(flexKey);
+        if (currentFlex?.sel.is_pasta) {
+          // Try to find a non-pasta flex candidate not already in plan
+          const flexCandidates = scoredBySlot.get('flex') ?? [];
+          const betterFlex = flexCandidates.find(
+            (c) => !c.recipe.sel.is_pasta && !bestPlan.usedIds.has(c.recipe.norm.id)
+          );
+          if (betterFlex) {
+            const swapped = clonePartialPlan(bestPlan);
+            swapped.usedIds.delete(currentFlex.norm.id);
+            swapped.assignments.set(flexKey, betterFlex.recipe);
+            swapped.usedIds.add(betterFlex.recipe.norm.id);
+            bestPlan = swapped;
+          }
+        }
+      }
+    }
+  }
+
   // --- 5. Compute full plan-level score ---
   const { planScore, breakdown: planBreakdown } = computePlanLevelScore(
     bestPlan,
@@ -638,6 +773,14 @@ export function buildWeeklyPlan(
     validation.failedConstraints.push(`empty_slot:${emptySlot}`);
   }
 
+  // --- 8. Diagnose weak selections ---
+  const selectedDespiteWarnings = computeSelectedDespiteWarnings(
+    bestPlan,
+    scoredBySlot,
+    request,
+    selectedRecipes
+  );
+
   return {
     request,
     selectedRecipeIds,
@@ -647,5 +790,6 @@ export function buildWeeklyPlan(
     shoppingOverlap,
     validation,
     alternatives,
+    selectedDespiteWarnings: selectedDespiteWarnings.length > 0 ? selectedDespiteWarnings : undefined,
   };
 }

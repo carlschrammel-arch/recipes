@@ -451,9 +451,9 @@ describe('scoreRecipeForRequest', () => {
     const scoreWith = scoreRecipeForRequest(recipeWithNutrition, req);
     const scoreWithout = scoreRecipeForRequest(recipeWithoutNutrition, req);
 
-    // Recipe with nutrition gets macro score; without does not
+    // Recipe with nutrition gets a positive macro score; without gets an uncertainty penalty
     expect(scoreWith.scoreBreakdown.macroFit ?? 0).toBeGreaterThan(0);
-    expect(scoreWithout.scoreBreakdown.macroFit ?? 0).toBe(0);
+    expect(scoreWithout.scoreBreakdown.macroFit ?? 0).toBeLessThan(0); // uncertainty penalty
     expect(scoreWithout.missingNutritionFields).toContain('protein_pct');
   });
 
@@ -654,27 +654,27 @@ describe('buildWeeklyPlan', () => {
     };
     const result = buildWeeklyPlan(ALL_SELS, NORM_MAP, req);
 
-    // Non-pantry shared ingredients should appear in the main list
-    expect(result.shoppingOverlap.sharedIngredients.length).toBeGreaterThan(0);
     expect(['low', 'medium', 'high']).toContain(result.shoppingOverlap.estimatedWasteRisk);
 
-    // Garlic (fridge_staple) appears in chicken, pork, and beef test recipes → shared
-    const mainKeys = result.shoppingOverlap.sharedIngredients.map((s) => s.ingredient);
-    expect(mainKeys).toContain('garlic');
+    // pantryOverlaps array must exist
+    expect(Array.isArray(result.shoppingOverlap.pantryOverlaps)).toBe(true);
 
-    // Each sharedIngredient should have a wasteClass (new field) — never 'pantry'
+    // Garlic is now a pantry staple — must NOT appear in the main sharedIngredients list
+    const mainKeys = result.shoppingOverlap.sharedIngredients.map((s) => s.ingredient);
+    expect(mainKeys).not.toContain('garlic');
+    expect(mainKeys).not.toContain('onion');
+    expect(mainKeys).not.toContain('butter');
+
+    // Pantry items must NOT appear in the main sharedIngredients list
+    const pantryIngredients = ['olive oil', 'salt', 'black pepper', 'cumin', 'paprika', 'pepper'];
+    for (const pantry of pantryIngredients) {
+      expect(mainKeys).not.toContain(pantry);
+    }
+
+    // Each sharedIngredient in the main list should never be classified as pantry
     for (const shared of result.shoppingOverlap.sharedIngredients) {
       expect(['perishable', 'specialty', 'fridge_staple']).toContain(shared.wasteClass);
       expect(shared.scoreWeight).toBeGreaterThan(0);
-    }
-
-    // pantryOverlaps array must exist (may be empty if no pantry items are shared)
-    expect(Array.isArray(result.shoppingOverlap.pantryOverlaps)).toBe(true);
-
-    // Pantry items must NOT appear in the main sharedIngredients list
-    const pantryIngredients = ['olive oil', 'salt', 'black pepper', 'cumin', 'paprika'];
-    for (const pantry of pantryIngredients) {
-      expect(mainKeys).not.toContain(pantry);
     }
   });
 });
@@ -1356,7 +1356,7 @@ describe('renderer — enrichment summary', () => {
     });
 
     expect(md).toContain('Enrichment');
-    expect(md).toContain('Estimated metadata was used for');
+    expect(md).toContain('Estimated nutrition was available for soft scoring only.');
     expect(md).toContain('not used for strict macro validation');
   });
 

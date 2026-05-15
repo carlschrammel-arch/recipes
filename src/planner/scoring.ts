@@ -138,10 +138,14 @@ function detectTransFatRisk(norm: NormalizedRecipe): 'low' | 'high' | 'unknown' 
 // ============================================================================
 
 const W = {
-  macroFit: { protein: 0.7, carbs: 0.7, fat: 0.6 },
+  /**
+   * Base macro-fit weights per macro dimension.
+   * These are multiplied by macroImportance (1x or 2x) based on active goals.
+   */
+  macroFit: { protein: 1.2, carbs: 0.8, fat: 1.2 },
   weightLoss: { calRange: 0.5, protPct: 0.3, fatPct: 0.2 },
-  highProtein: 1.0,
-  lowFat: 1.0,
+  highProtein: 1.5,
+  lowFat: 1.5,
   kidFriendly: { required: 1.0, bonus: 0.3 },
   quickEasy: 1.0,
   cost: { low: 1.0, medium: 0.7, high: 0.2 },
@@ -156,6 +160,34 @@ const W = {
   comfortFoodBonus: 0.3,
   cuisineBonus: 0.1,
 };
+
+// ============================================================================
+// Macro fit gradient scoring
+// ============================================================================
+
+/**
+ * Score how well an actual macro percentage fits a target range.
+ * Returns a value in [-1.0, 1.0]:
+ *   - In range: 1.0
+ *   - 1-5% outside: 0.5 (close)
+ *   - 6-10% outside: 0.0 (moderate miss)
+ *   - >10% outside: negative penalty (bad miss, up to -0.75)
+ */
+function macroFitGradient(
+  actual: number,
+  min: number | undefined,
+  max: number | undefined
+): number {
+  const belowMin = min !== undefined && actual < min ? min - actual : 0;
+  const aboveMax = max !== undefined && actual > max ? actual - max : 0;
+  const miss = Math.max(belowMin, aboveMax);
+
+  if (miss === 0) return 1.0;
+  if (miss <= 5) return 0.5;
+  if (miss <= 10) return 0.0;
+  // Penalty for extreme miss: ramps from 0 at 10% miss to -0.75 at 25% miss
+  return -Math.min((miss - 10) / 20, 1.0) * 0.75;
+}
 
 // ============================================================================
 // Main scoring function
@@ -177,42 +209,52 @@ export function scoreRecipeForRequest(
 
   // ---------- Macro targets ----------
   if (request.macroTargets) {
+    // Double the macro importance when the user also set related goals
+    const hasMacroGoals = request.goals.weightLoss || request.goals.highProtein || request.goals.lowFat;
+    const macroImportance = hasMacroGoals ? 2.0 : 1.0;
+
     let macroScore = 0;
+    let macroDataExpected = 0;
+    let macroDataAvailable = 0;
 
     if (request.macroTargets.proteinPct) {
+      macroDataExpected++;
       if (sel.macro_pct_protein !== null) {
+        macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.proteinPct;
-        const inRange =
-          (minPct === undefined || sel.macro_pct_protein >= minPct) &&
-          (maxPct === undefined || sel.macro_pct_protein <= maxPct);
-        macroScore += inRange ? W.macroFit.protein : 0;
+        macroScore += macroFitGradient(sel.macro_pct_protein, minPct, maxPct) * W.macroFit.protein * macroImportance;
       } else {
         missingNutritionSet.add('protein_pct');
       }
     }
 
     if (request.macroTargets.carbsPct) {
+      macroDataExpected++;
       if (sel.macro_pct_carbs !== null) {
+        macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.carbsPct;
-        const inRange =
-          (minPct === undefined || sel.macro_pct_carbs >= minPct) &&
-          (maxPct === undefined || sel.macro_pct_carbs <= maxPct);
-        macroScore += inRange ? W.macroFit.carbs : 0;
+        macroScore += macroFitGradient(sel.macro_pct_carbs, minPct, maxPct) * W.macroFit.carbs * macroImportance;
       } else {
         missingNutritionSet.add('carbs_pct');
       }
     }
 
     if (request.macroTargets.fatPct) {
+      macroDataExpected++;
       if (sel.macro_pct_fat !== null) {
+        macroDataAvailable++;
         const { minPct, maxPct } = request.macroTargets.fatPct;
-        const inRange =
-          (minPct === undefined || sel.macro_pct_fat >= minPct) &&
-          (maxPct === undefined || sel.macro_pct_fat <= maxPct);
-        macroScore += inRange ? W.macroFit.fat : 0;
+        macroScore += macroFitGradient(sel.macro_pct_fat, minPct, maxPct) * W.macroFit.fat * macroImportance;
       } else {
         missingNutritionSet.add('fat_pct');
       }
+    }
+
+    // Uncertainty penalty: missing macro data when targets were requested
+    if (macroDataExpected > 0 && macroDataAvailable < macroDataExpected) {
+      const missingFraction = (macroDataExpected - macroDataAvailable) / macroDataExpected;
+      // Penalty scales with importance; unknown is worse than known-bad when macros matter
+      macroScore -= missingFraction * 0.4 * macroImportance;
     }
 
     breakdown.macroFit = macroScore;

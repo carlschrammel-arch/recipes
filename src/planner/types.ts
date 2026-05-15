@@ -221,6 +221,16 @@ export interface WeeklyPlanResult {
   alternatives: PlanAlternative[];
   /** Present when auto-enrichment ran during planning. */
   enrichmentSummary?: EnrichmentSummary;
+  /**
+   * Recipes that were selected despite being a weak fit for some requested goals.
+   * Populated when a recipe has notably poor macro fit, is creamy pasta under
+   * weight-loss goals, or has other significant mismatches.
+   */
+  selectedDespiteWarnings?: Array<{
+    recipeId: string;
+    title: string;
+    reasons: string[];
+  }>;
 }
 
 // ============================================================================
