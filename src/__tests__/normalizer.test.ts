@@ -25,7 +25,7 @@ describe('normalizeRecipe', () => {
       const result = normalizeRecipe(raw);
       
       expect(result.id).toBeDefined();
-      expect(result.id.length).toBe(12);
+      expect(result.id.length).toBe(16);
       
       // Same input should produce same ID
       const result2 = normalizeRecipe(raw);

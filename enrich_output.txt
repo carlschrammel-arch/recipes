@@ -1,0 +1,10 @@
+
+🔬 Recipe Enrichment
+
+- Loading catalog…
+Catalog:   552 recipes
+Cached:    391 enrichment entries
+Mode:      force (re-enriching all 552 recipes)
+To enrich: 552 recipes
+
+- Enriching 0 / 552…

@@ -23,7 +23,7 @@ import { askRecipes } from './ask.js';
 import { planRecipes } from './planner/index.js';
 import { createInterface } from 'readline';
 import { loadHistory, saveHistory, appendToHistory } from './planner/history.js';
-import { loadEnrichmentCache, enrichRecipes } from './planner/enricher.js';
+import { loadEnrichmentCache, enrichRecipes, getMissingPlanningFields } from './planner/enricher.js';
 import { loadPlannerData } from './planner/index.js';
 import type { MealType, PrimaryProtein } from './types.js';
 
@@ -630,6 +630,7 @@ program
   .option('-d, --data <path>', 'Path to recipe data folder', './dist/recipe-context')
   .option('--model <model>', 'OpenAI model to use for enrichment', 'gpt-4o-mini')
   .option('--limit <n>', 'Max enrichment API calls (default: all remaining)', parseInt)
+  .option('--force', 'Re-enrich all recipes, ignoring existing cache (overwrites stale estimates)')
   .option('--dry-run', 'Report what would be enriched without calling OpenAI')
   .addHelpText('after', `
 Processes all recipes in the catalog that are missing nutrition/planning data.
@@ -642,6 +643,8 @@ Examples:
   $ recipe-context enrich
   $ recipe-context enrich --dry-run
   $ recipe-context enrich --limit 50
+  $ recipe-context enrich --force
+  $ recipe-context enrich --force --limit 100
 `)
   .action(async (options) => {
     const dataPath = resolve(options.data);
@@ -667,21 +670,28 @@ Examples:
     const cache = await loadEnrichmentCache(dataPath);
     spinner.stop();
 
-    // Find unenriched recipes (missing calories and not in cache)
+    // Determine which recipes need enrichment
     const allRecipes = [...plannerData.normalizedById.values()];
-    const toEnrich = allRecipes.filter((r) => {
-      // Skip if it has real nutrition data already
-      if (r.nutrition?.calories != null) return false;
-      // Skip if cached and cache is valid
-      const cached = cache.get(r.id);
-      if (cached) return false;
-      return true;
-    });
+    const toEnrich = options.force
+      ? allRecipes  // --force: re-enrich everything
+      : allRecipes.filter((r) => {
+          // Use the same eligibility check as the planning pipeline for consistency.
+          // This catches both recipes with no calories AND recipes that have calories
+          // but are missing macros (e.g., HelloFresh with carbs/fat: null).
+          if (getMissingPlanningFields(r).length === 0) return false;
+          // Skip if already cached with a valid record
+          const cached = cache.get(r.id);
+          if (cached) return false;
+          return true;
+        });
 
     const limit = options.limit ?? toEnrich.length;
 
     console.log(chalk.dim(`Catalog:   ${allRecipes.length} recipes`));
     console.log(chalk.dim(`Cached:    ${cache.size} enrichment entries`));
+    if (options.force) {
+      console.log(chalk.dim(`Mode:      force (re-enriching all ${allRecipes.length} recipes)`));
+    }
     console.log(chalk.dim(`To enrich: ${toEnrich.length} recipes${toEnrich.length > limit ? ` (limited to ${limit})` : ''}`));
     console.log();
 
@@ -713,6 +723,7 @@ Examples:
       apiKey,
       model: options.model,
       limit,
+      force: options.force ?? false,
       onProgress: (recipe, fromCache) => {
         if (!fromCache) done++;
         enrichProgress.text = chalk.dim(

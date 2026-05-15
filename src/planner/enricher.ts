@@ -266,6 +266,12 @@ export interface EnrichRecipesOptions {
   model?: string;
   /** Maximum number of API calls to make in this run. */
   limit?: number;
+  /**
+   * When true, bypass the cache validity check and re-enrich every recipe
+   * via the API regardless of whether a cached record already exists.
+   * Existing cache entries are overwritten with fresh estimates.
+   */
+  force?: boolean;
   /** Progress callback called for each recipe enriched. */
   onProgress?: (recipe: NormalizedRecipe, fromCache: boolean) => void;
 }
@@ -316,6 +322,7 @@ export async function enrichRecipes(options: EnrichRecipesOptions): Promise<Enri
     apiKey,
     model = 'gpt-4o-mini',
     limit = 20,
+    force = false,
     onProgress,
   } = options;
 
@@ -335,10 +342,10 @@ export async function enrichRecipes(options: EnrichRecipesOptions): Promise<Enri
 
   for (const recipe of sortedRecipes) {
     const missingFields = getMissingPlanningFields(recipe);
-    if (missingFields.length === 0) continue; // Already complete, skip
+    if (!force && missingFields.length === 0) continue; // Already complete, skip
 
     const cached = cache.get(recipe.id);
-    if (cached && isCacheValid(cached, recipe, model)) {
+    if (!force && cached && isCacheValid(cached, recipe, model)) {
       // Cache hit — collect which fields were estimated
       collectEstimatedFields(cached.metadata, estimatedFieldsSet);
       recipesFromCache++;
