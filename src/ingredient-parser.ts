@@ -182,8 +182,8 @@ function parseQuantity(text: string): { value: number; consumed: number } | null
  */
 function cleanIngredientName(name: string): string {
   return name
-    .replace(/^[-–—•*]\s*/, '')  // Remove leading bullets
-    .replace(/\s+/g, ' ')         // Normalize whitespace
+    .replace(/^[-–—•*.]+\s*/, '')  // Remove leading bullets and stray punctuation (e.g. period left by "oz.")
+    .replace(/\s+/g, ' ')          // Normalize whitespace
     .replace(/^(the|some|a|an)\s+/i, '')  // Remove articles
     .trim();
 }

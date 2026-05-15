@@ -95,7 +95,8 @@ const INGREDIENT_NORMALIZATIONS: [RegExp, string][] = [
  * Normalize an ingredient name to a canonical grocery key for shopping overlap.
  */
 export function canonicalIngredientKey(ingredientName: string): string {
-  const lower = ingredientName.toLowerCase().trim();
+  // Strip leading non-alphanumeric chars (e.g. ". white rice" from "oz." unit abbreviation)
+  const lower = ingredientName.toLowerCase().trim().replace(/^[^a-z0-9]+/, '');
 
   for (const [pattern, canonical] of INGREDIENT_NORMALIZATIONS) {
     if (pattern.test(lower)) return canonical;

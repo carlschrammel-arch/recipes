@@ -85,6 +85,14 @@ function passesIngredientSafetyCheck(
 ): boolean {
   if (slot !== 'vegetarian' && slot !== 'vegan') return true;
 
+  // Title-level check: reject if the recipe title contains any meat term.
+  // Guards against mis-labelled catalog entries (e.g. "Greek Chicken Meatballs"
+  // tagged is_vegetarian=true due to a classification error).
+  const titleLower = norm.title.toLowerCase();
+  for (const term of MEAT_TERMS) {
+    if (titleLower.includes(term)) return false;
+  }
+
   const ingText = norm.ingredients
     .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
     .join(' ');

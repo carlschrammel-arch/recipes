@@ -21,7 +21,8 @@ import { getSampleConfigContent } from './config-loader.js';
 import { validateOutput, testDeterminism, formatValidationResult } from './validator.js';
 import { askRecipes } from './ask.js';
 import { planRecipes } from './planner/index.js';
-import { loadHistory, saveHistory } from './planner/history.js';
+import { createInterface } from 'readline';
+import { loadHistory, saveHistory, appendToHistory } from './planner/history.js';
 import type { MealType, PrimaryProtein } from './types.js';
 
 const program = new Command();
@@ -487,7 +488,7 @@ Environment:
         // Commander.js: --include-history → options.includeHistory
         //               --no-history     → options.history === false (negation flag)
         excludeHistory: !options.includeHistory && options.history !== false,
-        saveHistory: options.saveHistory ?? false,
+        saveHistory: false, // CLI owns saving — either silently (--save-history) or after interactive prompt
         autoEnrich,
         enrichmentLimit: options.enrichmentLimit ?? 20,
         useEstimatedMacrosForSoftScoring: true,
@@ -572,13 +573,39 @@ Environment:
 
       console.log(chalk.dim(`\nPlan score: ${output.result.planScore.toFixed(2)}`));
       console.log(chalk.dim(`Recipes: ${output.result.selectedRecipes.length} selected from local catalog`));
+      console.log();
+
+      // ---- History saving: explicit flag or interactive prompt ----
+      const recipesToSave = output.result.selectedRecipes.map((r) => ({ id: r.id, title: r.title }));
+
       if (options.saveHistory) {
+        // Explicit --save-history: save without prompting
+        await appendToHistory(dataPath, recipesToSave);
         console.log(chalk.dim('Saved to history. These recipes will be skipped in future plans.'));
         console.log(chalk.dim('Use --include-history to override, or "recipe-context history" to review entries.'));
+        console.log();
+      } else if (process.stdout.isTTY) {
+        // Interactive: ask the user
+        const answer = await new Promise<string>((resolve) => {
+          const rl = createInterface({ input: process.stdin, output: process.stdout });
+          rl.question(chalk.cyan('Save these recipes to history? [y/N] '), (ans) => {
+            rl.close();
+            resolve(ans.trim().toLowerCase());
+          });
+        });
+        if (answer === 'y' || answer === 'yes') {
+          await appendToHistory(dataPath, recipesToSave);
+          console.log(chalk.dim('Saved. These recipes will be skipped in future plans.'));
+          console.log(chalk.dim('Use --include-history to override, or "recipe-context history" to review entries.'));
+        } else {
+          console.log(chalk.dim('Not saved. Run with --save-history to save without prompting.'));
+        }
+        console.log();
       } else {
-        console.log(chalk.dim('History not updated. Use --save-history to skip these in future plans.'));
+        // Non-TTY (piped/scripted): don't prompt, don't save
+        console.log(chalk.dim('History not updated. Use --save-history to save without prompting.'));
+        console.log();
       }
-      console.log();
 
     } catch (err) {
       spinner.fail('Plan failed');

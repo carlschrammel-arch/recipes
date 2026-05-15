@@ -29,7 +29,17 @@ At least some of the meals contain monounsaturated fats or omega-3 fats
 Limited amount of saturated fats
 At least one recipe from Hello Fresh
 At least one that has pasta
-One of the meals can be a comfort food" --verbose --auto-enrich --save-history
+One of the meals can be a comfort food" --verbose --auto-enrich 
+
+recipe-context plan "Choose 5 recipes that meet this criteria:
+1 chicken
+1 pork
+1 beef
+1 vegetarian or vegan
+1 mexican
+At least 2 meals are kid friendly
+Low calorie and high protien" --verbose --auto-enrich 
+
 
 ```
 
