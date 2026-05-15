@@ -35,9 +35,37 @@ const SUPPORTED_EXTENSIONS = new Set([
 ]);
 
 /**
- * Recursively scan a directory for recipe files
+ * Recursively scan a directory (or a single recipe file) for recipe files.
+ * When rootPath points to a file it is treated as a single-file import.
  */
 export async function scanDirectory(rootPath: string): Promise<ScanResult> {
+  // Handle single-file input (e.g. a .paprikarecipes archive)
+  const rootStat = await stat(rootPath).catch(() => null);
+  if (rootStat?.isFile()) {
+    const ext = extname(rootPath).toLowerCase();
+    try {
+      const content = await readFile(rootPath);
+      const file: ScannedFile = {
+        path: rootPath,
+        name: rootPath.split('/').pop()!,
+        extension: ext,
+        size: rootStat.size,
+        content,
+      };
+      return {
+        files: [file],
+        errors: [],
+        stats: { totalFiles: 1, totalSize: rootStat.size, byExtension: { [ext]: 1 } },
+      };
+    } catch (err) {
+      return {
+        files: [],
+        errors: [{ path: rootPath, error: err instanceof Error ? err.message : String(err) }],
+        stats: { totalFiles: 0, totalSize: 0, byExtension: {} },
+      };
+    }
+  }
+
   const files: ScannedFile[] = [];
   const errors: Array<{ path: string; error: string }> = [];
   const byExtension: Record<string, number> = {};
@@ -125,14 +153,77 @@ export function getDefaultICloudPath(): string {
   return join(home, 'Library', 'Mobile Documents', 'com~apple~CloudDocs');
 }
 
+// Matches: "Export 2026-05-14 11.56.58 All Recipes"
+const EXPORT_DATE_RE = /^Export (\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2})/;
+
+export interface FoundExport {
+  /** Absolute path — may be a directory or a .paprikarecipes file */
+  path: string;
+  name: string;
+  date: Date;
+  isFile: boolean;
+}
+
 /**
- * Validate that a path exists and is accessible
+ * Scan iCloudRoot (defaults to ~/Library/Mobile Documents/com~apple~CloudDocs)
+ * and return all Paprika export entries sorted newest-first.
+ * Matches both folders and single .paprikarecipes files named like:
+ *   "Export 2026-05-14 11.56.58 All Recipes"
+ *   "Export 2026-05-14 11.56.58 All Recipes.paprikarecipes"
+ */
+export async function findPaprikaExports(
+  iCloudRoot?: string,
+): Promise<FoundExport[]> {
+  const root = iCloudRoot ?? getDefaultICloudPath();
+  const entries = await readdir(root, { withFileTypes: true });
+
+  const exports: FoundExport[] = [];
+
+  for (const entry of entries) {
+    const m = EXPORT_DATE_RE.exec(entry.name);
+    if (!m) continue;
+
+    // Parse date: replace dots in time with colons for ISO parsing
+    const datePart = m[1].replace(/(\d{2})\.(\d{2})\.(\d{2})$/, '$1:$2:$3');
+    const date = new Date(datePart);
+    if (isNaN(date.getTime())) continue;
+
+    const isFile = entry.isFile() && entry.name.toLowerCase().endsWith('.paprikarecipes');
+    const isDir  = entry.isDirectory();
+    if (!isFile && !isDir) continue;
+
+    exports.push({
+      path: join(root, entry.name),
+      name: entry.name,
+      date,
+      isFile,
+    });
+  }
+
+  // Newest first
+  exports.sort((a, b) => b.date.getTime() - a.date.getTime());
+  return exports;
+}
+
+/**
+ * Return the single most-recent Paprika export, or null if none found.
+ */
+export async function findLatestPaprikaExport(
+  iCloudRoot?: string,
+): Promise<FoundExport | null> {
+  const all = await findPaprikaExports(iCloudRoot);
+  return all[0] ?? null;
+}
+
+/**
+ * Validate that a path exists and is accessible.
+ * Accepts both directories and supported recipe files (.paprikarecipes, .zip, etc.).
  */
 export async function validatePath(path: string): Promise<{ valid: boolean; error?: string }> {
   try {
     const stats = await stat(path);
-    if (!stats.isDirectory()) {
-      return { valid: false, error: 'Path is not a directory' };
+    if (!stats.isDirectory() && !stats.isFile()) {
+      return { valid: false, error: 'Path is not a file or directory' };
     }
     return { valid: true };
   } catch (err) {

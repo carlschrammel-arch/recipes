@@ -103,5 +103,24 @@ hellofresh_format: true
 # Context generation settings
 max_recipes_in_context: 500   # Maximum recipes in context.project.md
 max_chars: 200000             # Maximum characters in context file
+
+# Planning settings — controls the "recipe-context plan" command
+planning:
+  # When to automatically enrich recipes with missing planning metadata via OpenAI.
+  # "off"            — Never call OpenAI during planning. Use local + cached data only.
+  # "selected_only"  — Enrich only the 4-6 finally-selected recipes (default, recommended).
+  # "candidates"     — Enrich top candidates per slot before scoring (more API calls).
+  auto_enrich: selected_only
+
+  # Maximum number of OpenAI enrichment calls per planning run.
+  # Prevents runaway API usage when many candidates are missing metadata.
+  enrichment_limit_per_plan: 20
+
+  # Use estimated macro grams from enrichment for soft scoring (not strict validation).
+  # When true, estimated nutrition improves macro-fit scoring for enriched recipes.
+  use_estimated_macros_for_soft_scoring: true
+
+  # Estimated macros are NEVER used for strict validation. This is always false.
+  use_estimated_macros_for_strict_validation: false
 `;
 }

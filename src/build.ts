@@ -68,7 +68,7 @@ export async function build(
   report('scanning', 1, 1, `Found ${scanResult.files.length} files`);
 
   if (scanResult.files.length === 0) {
-    throw new Error('No recipe files found in input directory');
+    throw new Error('No recipe files found. Check that the input path contains supported formats (.paprikarecipes, .html, .txt, .json).');
   }
 
   // Phase 2: Parse files

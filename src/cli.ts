@@ -16,9 +16,12 @@ import { writeFile } from 'fs/promises';
 
 import { build } from './build.js';
 import { loadRecipes, loadIndex, searchRecipes, formatSearchResults, formatStats } from './search.js';
-import { getDefaultICloudPath } from './scanner.js';
+import { getDefaultICloudPath, findLatestPaprikaExport } from './scanner.js';
 import { getSampleConfigContent } from './config-loader.js';
 import { validateOutput, testDeterminism, formatValidationResult } from './validator.js';
+import { askRecipes } from './ask.js';
+import { planRecipes } from './planner/index.js';
+import { loadHistory, saveHistory } from './planner/history.js';
 import type { MealType, PrimaryProtein } from './types.js';
 
 const program = new Command();
@@ -35,7 +38,7 @@ program
 program
   .command('build')
   .description('Import and process recipes from a folder')
-  .requiredOption('-i, --input <path>', 'Input folder containing recipe exports')
+  .option('-i, --input <path>', 'Input folder or .paprikarecipes file (auto-detects latest iCloud export if omitted)')
   .option('-o, --output <path>', 'Output folder for generated files', './dist/recipe-context')
   .option('-c, --config <path>', 'Path to config file (YAML or JSON)')
   .option('--max-chars <number>', 'Maximum characters in context file', parseInt)
@@ -45,18 +48,40 @@ program
   .action(async (options) => {
     console.log(chalk.bold('\n🍳 Recipe Context Builder\n'));
 
-    const inputPath = resolve(options.input);
-    const outputPath = resolve(options.output);
+    let inputPath: string;
 
-    // Check if input path exists
-    if (!existsSync(inputPath)) {
-      console.error(chalk.red(`Error: Input path does not exist: ${inputPath}`));
-      console.log(chalk.dim(`\nTip: Your iCloud Drive path is typically:`));
-      console.log(chalk.dim(`  ${getDefaultICloudPath()}`));
-      process.exit(1);
+    if (options.input) {
+      inputPath = resolve(options.input);
+      if (!existsSync(inputPath)) {
+        console.error(chalk.red(`Error: Input path does not exist: ${inputPath}`));
+        process.exit(1);
+      }
+    } else {
+      // Auto-detect latest Paprika export in iCloud Drive
+      const spinner = ora('Looking for Paprika exports in iCloud Drive…').start();
+      try {
+        const latest = await findLatestPaprikaExport();
+        if (!latest) {
+          spinner.fail('No Paprika exports found in iCloud Drive.');
+          console.log(chalk.dim(`\nLooked in: ${getDefaultICloudPath()}`));
+          console.log(chalk.dim('Export your recipes from Paprika 3 → File → Export → All Recipes'));
+          console.log(chalk.dim('Then re-run, or use: recipe-context build -i <path>'));
+          process.exit(1);
+        }
+        spinner.succeed(
+          `Found: ${chalk.cyan(latest.name)} ${chalk.dim(`(${latest.date.toLocaleDateString()})`)}`
+        );
+        inputPath = latest.path;
+      } catch (err) {
+        spinner.fail('Failed to scan iCloud Drive.');
+        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        process.exit(1);
+      }
     }
 
-    const spinner = ora('Starting build...').start();
+    const outputPath = resolve(options.output);
+
+    const buildSpinner = ora('Starting build...').start();
 
     try {
       const result = await build(
@@ -70,11 +95,11 @@ program
           verbose: options.verbose,
         },
         (progress) => {
-          spinner.text = `[${progress.phase}] ${progress.message}`;
+          buildSpinner.text = `[${progress.phase}] ${progress.message}`;
         }
       );
 
-      spinner.succeed('Build complete!');
+      buildSpinner.succeed('Build complete!');
 
       // Print summary
       console.log('\n' + chalk.bold('📊 Summary'));
@@ -115,7 +140,7 @@ program
       console.log();
 
     } catch (err) {
-      spinner.fail('Build failed');
+      buildSpinner.fail('Build failed');
       console.error(chalk.red(`\nError: ${err instanceof Error ? err.message : err}`));
       process.exit(1);
     }
@@ -315,6 +340,289 @@ program
     console.log(chalk.bold('Example Usage:'));
     console.log(chalk.cyan('  recipe-context build -i "~/Library/Mobile Documents/com~apple~CloudDocs/Export 2025-11-12 22.30.23 Todo"'));
     console.log();
+  });
+
+// ============================================================================
+// ASK Command — natural language recipe search via OpenAI
+// ============================================================================
+
+program
+  .command('ask')
+  .description('Find recipes using natural language (requires OpenAI API key)')
+  .argument('<query>', 'Natural language query, e.g. "5 low-calorie high-protein recipes kids would like"')
+  .option('-d, --data <path>', 'Path to recipe data folder', './dist/recipe-context')
+  .option('-k, --api-key <key>', 'OpenAI API key (or set OPENAI_API_KEY env var)')
+  .option('-m, --model <model>', 'OpenAI model to use (default: gpt-4o-mini)', 'gpt-4o-mini')
+  .option('-v, --verbose', 'Show verbose output including token usage and cost')
+  .addHelpText('after', `
+Examples:
+  $ recipe-context ask "5 low-calorie high-protein recipes kids would like. one chicken, one beef, one pork, one veggie, one mexican"
+  $ recipe-context ask "quick weeknight dinners under 30 minutes, nothing spicy" --model gpt-4o
+  $ recipe-context ask "Sunday meal prep ideas that freeze well" -d ./my-recipes
+
+Environment:
+  OPENAI_API_KEY   Set this instead of passing --api-key each time.
+
+Cost:
+  Uses gpt-4o-mini by default (~$0.15/1M input tokens).
+  A typical query with 1 000 recipes costs less than $0.01.
+`)
+  .action(async (query: string, options) => {
+    const dataPath = resolve(options.data);
+
+    if (!existsSync(join(dataPath, 'catalog.selection.jsonl'))) {
+      console.error(chalk.red(`Error: No recipe data found at ${dataPath}`));
+      console.log(chalk.dim('Run "recipe-context build" first to generate the data.'));
+      process.exit(1);
+    }
+
+    console.log(chalk.bold('\n🤖 Recipe Search\n'));
+    console.log(chalk.dim(`Query: ${query}\n`));
+
+    const spinner = ora('Asking AI…').start();
+
+    try {
+      // Capture console.log output after spinner stops
+      spinner.stop();
+
+      await askRecipes(query, {
+        apiKey: options.apiKey,
+        model: options.model,
+        dataPath,
+        verbose: options.verbose,
+      });
+    } catch (err) {
+      spinner.fail('Search failed');
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`\nError: ${msg}`));
+      if (msg.includes('API key')) {
+        console.log(chalk.dim('\nTip: export OPENAI_API_KEY=sk-... and try again.'));
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// PLAN Command — deterministic weekly meal plan via optimizer + AI query parser
+// ============================================================================
+
+program
+  .command('plan')
+  .description('Build a weekly meal plan from natural language (deterministic optimizer, AI parses intent only)')
+  .argument('<query>', 'Planning query, e.g. "1 chicken, 1 pork, 1 beef, 1 vegetarian, kid friendly, high protein"')
+  .option('-d, --data <path>', 'Path to recipe data folder', './dist/recipe-context')
+  .option('-k, --api-key <key>', 'OpenAI API key (or set OPENAI_API_KEY env var)')
+  .option('-m, --model <model>', 'OpenAI model to use for query parsing', 'gpt-4o-mini')
+  .option('-v, --verbose', 'Show score breakdowns and candidate counts')
+  .option('--json', 'Output full plan result as JSON instead of markdown')
+  .option('--max-candidates <n>', 'Max candidates per slot for beam search (default: 75)', parseInt, 75)
+  .option('--no-ai-parser', 'Use offline regex parser only (no OpenAI API call for query parsing)')
+  .option('--explain', 'Ask AI to write a brief explanation of the selected plan')
+  .option('--no-history', 'Ignore past suggestions — include all recipes this run (does not update history)')
+  .option('--auto-enrich', 'Enrich candidate recipes before scoring (calls OpenAI for missing metadata)')
+  .option('--auto-enrich-selected', 'Enrich only selected recipes after initial plan, then re-score (default)')
+  .option('--no-auto-enrich', 'Never call OpenAI for enrichment during planning')
+  .option('--enrichment-limit <n>', 'Max enrichment API calls per planning run (default: 20)', parseInt, 20)
+  .addHelpText('after', `
+Architecture:
+  1. AI (or offline parser) converts your query into structured constraints.
+  2. A deterministic TypeScript optimizer selects real recipes from your catalog.
+  3. No hallucinated recipes — all IDs are verified against local data.
+  4. AI may optionally explain the result but cannot change recipe selections.
+
+Auto-enrichment:
+  By default (--auto-enrich-selected), selected recipes missing metadata are enriched
+  after the initial plan is built. Results are cached in recipes.enrichment.jsonl.
+  Estimated macros are used for soft scoring only — never for strict validation.
+
+Examples:
+  $ recipe-context plan "1 chicken, 1 pork, 1 beef, 1 vegetarian — kid friendly, high protein, freeze and reheat"
+  $ recipe-context plan "weekly plan: high protein, low fat, at least one HelloFresh, one pasta dish" --verbose
+  $ recipe-context plan "meal prep ideas, prefer lentils and black beans" --no-ai-parser
+  $ recipe-context plan "..." --auto-enrich --enrichment-limit 10
+  $ recipe-context plan "..." --no-auto-enrich
+
+Environment:
+  OPENAI_API_KEY   Used for query parsing, enrichment, and (if --explain) plan explanation.
+`)
+  .action(async (query: string, options) => {
+    const dataPath = resolve(options.data);
+    const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
+
+    if (!existsSync(join(dataPath, 'catalog.selection.jsonl'))) {
+      console.error(chalk.red(`Error: No recipe data found at ${dataPath}`));
+      console.log(chalk.dim('Run "recipe-context build" first to generate the data.'));
+      process.exit(1);
+    }
+
+    // Determine auto-enrich mode from CLI flags
+    // --no-auto-enrich wins over --auto-enrich-selected which wins over --auto-enrich
+    let autoEnrich: 'off' | 'selected_only' | 'candidates' = 'selected_only';
+    if (options['no-auto-enrich']) {
+      autoEnrich = 'off';
+    } else if (options.autoEnrich) {
+      autoEnrich = 'candidates';
+    } else if (options.autoEnrichSelected === false) {
+      autoEnrich = 'off'; // explicit --no-auto-enrich-selected (commander default behavior)
+    }
+
+    console.log(chalk.bold('\n📅 Weekly Meal Planner\n'));
+    console.log(chalk.dim(`Query: ${query}\n`));
+
+    const spinner = ora('Building meal plan…').start();
+
+    try {
+      const output = await planRecipes(query, {
+        apiKey,
+        model: options.model,
+        dataPath,
+        verbose: options.verbose,
+        json: options.json,
+        maxCandidatesPerSlot: options.maxCandidates,
+        noAiParser: options['no-ai-parser'],
+        explain: options.explain,
+        skipHistory: !options['no-history'],
+        autoEnrich,
+        enrichmentLimit: options.enrichmentLimit ?? 20,
+        useEstimatedMacrosForSoftScoring: true,
+      });
+
+      spinner.stop();
+
+      if (options.json) {
+        console.log(JSON.stringify(output.result, null, 2));
+        return;
+      }
+
+      // Verbose pre-output
+      if (options.verbose) {
+        console.log(chalk.bold('Parsed Request:'));
+        console.log(chalk.dim(JSON.stringify(output.parsedRequest, null, 2)));
+        console.log();
+
+        if (output.usedFallback) {
+          console.log(chalk.yellow('⚠ Used offline parser (AI parser unavailable or failed)'));
+        } else {
+          console.log(chalk.green('✓ Query parsed by AI'));
+        }
+
+        if (output.parseWarnings.length > 0) {
+          for (const w of output.parseWarnings) {
+            console.log(chalk.yellow(`  ⚠ ${w}`));
+          }
+        }
+        console.log();
+      }
+
+      // Print the markdown plan
+      console.log(output.markdown);
+
+      // AI explanation (appended below the plan)
+      if (output.aiExplanation) {
+        console.log('\n' + chalk.bold('💬 AI Explanation') + '\n');
+        console.log(output.aiExplanation);
+      }
+
+      // Validation summary
+      const { validation } = output.result;
+      if (!validation.hardConstraintsSatisfied) {
+        console.log(chalk.yellow('\n⚠ Some constraints could not be fully satisfied.'));
+        for (const fc of validation.failedConstraints) {
+          console.log(chalk.dim(`  • ${fc}`));
+        }
+      } else {
+        console.log(chalk.green('\n✅ All hard constraints satisfied.'));
+      }
+
+      console.log(chalk.dim(`\nPlan score: ${output.result.planScore.toFixed(2)}`));
+      console.log(chalk.dim(`Recipes: ${output.result.selectedRecipes.length} selected from local catalog`));
+      if (!options['no-history']) {
+        console.log(chalk.dim('These recipes have been saved to history and will be excluded from future plans.'));
+        console.log(chalk.dim('Run "recipe-context history" to review or remove entries.\n'));
+      } else {
+        console.log();
+      }
+
+    } catch (err) {
+      spinner.fail('Plan failed');
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(chalk.red(`\nError: ${msg}`));
+      if (msg.includes('API key')) {
+        console.log(chalk.dim('\nTip: export OPENAI_API_KEY=sk-... or use --no-ai-parser to skip AI query parsing.'));
+      }
+      process.exit(1);
+    }
+  });
+
+// ============================================================================
+// HISTORY Command — review and manage previously-suggested recipes
+// ============================================================================
+
+program
+  .command('history')
+  .description('View and manage recipes that have been suggested by the planner')
+  .option('-d, --data <path>', 'Path to recipe data folder', './dist/recipe-context')
+  .option('--remove <text>', 'Remove entries whose title contains <text> (case-insensitive)')
+  .option('--clear', 'Remove all history entries')
+  .addHelpText('after', `
+The history file is stored at <data>/plan-history.json.
+You can also edit it by hand — each entry is a JSON object with id, title, and suggestedAt.
+Deleting an entry lets that recipe appear in future plans again.
+
+Examples:
+  $ recipe-context history
+  $ recipe-context history --remove "chicken stir fry"
+  $ recipe-context history --clear
+`)
+  .action(async (options) => {
+    const dataPath = resolve(options.data);
+    const entries = await loadHistory(dataPath);
+
+    if (options.clear) {
+      await saveHistory(dataPath, []);
+      console.log(chalk.green(`\n✅ Cleared ${entries.length} history ${entries.length === 1 ? 'entry' : 'entries'}.\n`));
+      return;
+    }
+
+    if (options.remove) {
+      const needle = (options.remove as string).toLowerCase();
+      const kept = entries.filter((e) => !e.title.toLowerCase().includes(needle));
+      const removed = entries.length - kept.length;
+      if (removed === 0) {
+        console.log(chalk.yellow(`\nNo entries matched "${options.remove}".\n`));
+        return;
+      }
+      await saveHistory(dataPath, kept);
+      console.log(chalk.green(`\n✅ Removed ${removed} ${removed === 1 ? 'entry' : 'entries'} matching "${options.remove}".\n`));
+      return;
+    }
+
+    // Default: list all entries
+    if (entries.length === 0) {
+      console.log(chalk.dim('\nNo plan history yet. Run "recipe-context plan" to build a plan.\n'));
+      return;
+    }
+
+    console.log(chalk.bold(`\n📋 Plan History (${entries.length} ${entries.length === 1 ? 'recipe' : 'recipes'})\n`));
+
+    const table = new Table({
+      head: [chalk.cyan('#'), chalk.cyan('Title'), chalk.cyan('Suggested')],
+      style: { head: [], border: [] },
+      colWidths: [4, 52, 22],
+      wordWrap: true,
+    });
+
+    entries.forEach((e, i) => {
+      const date = new Date(e.suggestedAt).toLocaleDateString(undefined, {
+        year: 'numeric', month: 'short', day: 'numeric',
+      });
+      table.push([(i + 1).toString(), e.title, date]);
+    });
+
+    console.log(table.toString());
+    console.log(chalk.dim('\nTo remove an entry: recipe-context history --remove "<partial title>"'));
+    console.log(chalk.dim('To clear all:        recipe-context history --clear'));
+    console.log(chalk.dim('To edit by hand:     open ' + resolve(dataPath, 'plan-history.json') + '\n'));
   });
 
 program.parse();

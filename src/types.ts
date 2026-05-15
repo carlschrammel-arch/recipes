@@ -118,6 +118,29 @@ export interface UserConfig {
   // Context generation settings
   max_recipes_in_context?: number;
   max_chars?: number;
+
+  // Planning settings
+  planning?: {
+    /**
+     * When to auto-enrich recipes with missing planning metadata via OpenAI.
+     * - "off": Never call OpenAI during planning. Use local + cached data only.
+     * - "selected_only": Enrich only the finally-selected recipes (default).
+     * - "candidates": Enrich top candidates per slot before scoring (more API calls).
+     */
+    auto_enrich?: 'off' | 'selected_only' | 'candidates';
+    /** Maximum enrichment API calls per planning run (default: 20). */
+    enrichment_limit_per_plan?: number;
+    /**
+     * When true, estimated macro grams from enrichment are used for soft scoring.
+     * They are NEVER used for strict validation regardless of this setting.
+     */
+    use_estimated_macros_for_soft_scoring?: boolean;
+    /**
+     * Must remain false. Estimated macros are never valid for strict macro validation.
+     * This field exists for documentation; the code ignores any true value.
+     */
+    use_estimated_macros_for_strict_validation?: false;
+  };
 }
 
 // ============================================================================

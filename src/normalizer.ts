@@ -92,12 +92,14 @@ export function normalizeRecipe(raw: RawRecipe): NormalizedRecipe {
 function generateRecipeId(title: string, source: string | undefined, ingredients: string[]): string {
   const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]/g, '');
   const normalizedSource = (source || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const ingredientHash = ingredients.slice(0, 5).join('').toLowerCase().replace(/[^a-z0-9]/g, '');
+  // Use all ingredients (not just first 5) and include count to reduce collisions
+  const ingredientHash = ingredients.join('|').toLowerCase().replace(/[^a-z0-9|]/g, '');
   
-  const combined = `${normalizedTitle}|${normalizedSource}|${ingredientHash}`;
+  const combined = `${normalizedTitle}|${normalizedSource}|${ingredients.length}|${ingredientHash}`;
   const hash = createHash('sha256').update(combined).digest('hex');
   
-  return hash.slice(0, 12);
+  // 16 hex chars = 64 bits; birthday-collision probability for 10 000 recipes ≈ 5×10⁻¹⁰
+  return hash.slice(0, 16);
 }
 
 /**
