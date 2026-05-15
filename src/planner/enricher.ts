@@ -281,8 +281,32 @@ export interface EnrichResult {
 }
 
 /**
+ * Assign a numeric priority to a recipe for enrichment ordering.
+ * Lower number = higher priority = enriched first.
+ *
+ * Priority rationale:
+ *   0 — Has calories but missing ≥1 macro (protein/carbs/fat).
+ *       These recipes get a macroFit: -0.800 scoring penalty and benefit
+ *       the most from enrichment during beam-search scoring.
+ *   1 — No calories at all — gets full estimated nutrition.
+ *   2 — Only missing soft signals (kid_friendly_score, weeknight_score).
+ */
+function enrichmentPriority(recipe: NormalizedRecipe): number {
+  const n = recipe.nutrition;
+  if (n?.calories != null && (n.protein_g === null || n.carbs_g === null || n.fat_g === null)) {
+    return 0;
+  }
+  if (!n || n.calories === null) {
+    return 1;
+  }
+  return 2;
+}
+
+/**
  * Enrich the given recipes with planning metadata.
  * Uses cache-first strategy; calls OpenAI only when needed and within limit.
+ * Recipes are processed in enrichment-priority order so the API call budget
+ * goes to the recipes that benefit most from macro estimation.
  */
 export async function enrichRecipes(options: EnrichRecipesOptions): Promise<EnrichResult> {
   const {
@@ -295,6 +319,12 @@ export async function enrichRecipes(options: EnrichRecipesOptions): Promise<Enri
     onProgress,
   } = options;
 
+  // Sort by enrichment priority so the API call budget is used on recipes
+  // that benefit most (partial macros first, then no-nutrition, then soft-only).
+  const sortedRecipes = [...recipes].sort(
+    (a, b) => enrichmentPriority(a) - enrichmentPriority(b)
+  );
+
   const client = apiKey ? new OpenAI({ apiKey }) : null;
   let apiCallsUsed = 0;
   let recipesEnriched = 0;
@@ -303,7 +333,7 @@ export async function enrichRecipes(options: EnrichRecipesOptions): Promise<Enri
   const enrichedRecipes: Array<{ id: string; title: string }> = [];
   const estimatedFieldsSet = new Set<string>();
 
-  for (const recipe of recipes) {
+  for (const recipe of sortedRecipes) {
     const missingFields = getMissingPlanningFields(recipe);
     if (missingFields.length === 0) continue; // Already complete, skip
 
