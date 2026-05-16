@@ -112,6 +112,69 @@ function passesIngredientSafetyCheck(
   return true;
 }
 
+/**
+ * Returns true if a recipe matches ALL terms in allMustMatchTerms (via title or tags).
+ * Used to hard-filter candidate pools when the user requested "N [dish] recipes".
+ */
+function matchesDishTerms(
+  norm: NormalizedRecipe,
+  sel: SelectionRecord,
+  terms: string[]
+): boolean {
+  if (terms.length === 0) return true;
+  // Normalize hyphens to spaces so "one pot" matches "One-Pot" titles
+  const title = norm.title.toLowerCase().replace(/-/g, ' ');
+  const tagSet = sel.tags.map((t) => t.toLowerCase().replace(/-/g, ' '));
+  return terms.every((term) => {
+    const t = term.toLowerCase();
+    return title.includes(t) || tagSet.some((tag) => tag.includes(t));
+  });
+}
+
+/**
+ * Returns true if a recipe matches AT LEAST ONE term in anyDishTypes (OR logic).
+ * Used for "soups or stews", "noodles or dumplings", etc.
+ */
+function matchesAnyDishType(
+  norm: NormalizedRecipe,
+  sel: SelectionRecord,
+  terms: string[]
+): boolean {
+  if (terms.length === 0) return true;
+  // Normalize hyphens to spaces so "one pot" matches "One-Pot" titles
+  const title = norm.title.toLowerCase().replace(/-/g, ' ');
+  const tagSet = sel.tags.map((t) => t.toLowerCase().replace(/-/g, ' '));
+  return terms.some((term) => {
+    const t = term.toLowerCase();
+    return title.includes(t) || tagSet.some((tag) => tag.includes(t));
+  });
+}
+
+/**
+ * Returns true if a recipe contains ALL required ingredient terms in its
+ * ingredient list text or title.
+ */
+function matchesRequiredIngredients(
+  norm: NormalizedRecipe,
+  terms: string[]
+): boolean {
+  if (terms.length === 0) return true;
+  const ingText = norm.ingredients
+    .map((i) => (i.ingredient + ' ' + i.original).toLowerCase())
+    .join(' ');
+  const titleLower = norm.title.toLowerCase();
+  return terms.every((term) => {
+    const t = term.toLowerCase();
+    // Match the term itself, or its plural/singular variant
+    const tPlural = t.endsWith('s') ? t : `${t}s`;
+    const tSingular = t.endsWith('s') && t.length > 3 ? t.slice(0, -1) : t;
+    return (
+      ingText.includes(t) || ingText.includes(tPlural) || ingText.includes(tSingular) ||
+      titleLower.includes(t) || titleLower.includes(tPlural) || titleLower.includes(tSingular)
+    );
+  });
+}
+
 // ============================================================================
 // Main filter function
 // ============================================================================
@@ -162,6 +225,24 @@ export function getCandidatesForPlan(
       // Ingredient-level safety for vegetarian/vegan
       if (!passesIngredientSafetyCheck(norm, slot)) continue;
 
+      // Hard dish-type filter: if allMustMatchTerms is set, only keep matching recipes
+      if (request.allMustMatchTerms?.length) {
+        if (!matchesDishTerms(norm, sel, request.allMustMatchTerms)) continue;
+      }
+
+      // OR dish-type filter: recipe must match at least one of anyDishTypes
+      if (request.anyDishTypes?.length) {
+        if (!matchesAnyDishType(norm, sel, request.anyDishTypes)) continue;
+      }
+
+      // Required ingredient filter: all terms must appear in ingredients or title
+      if (request.requiredIngredientTerms?.length) {
+        if (!matchesRequiredIngredients(norm, request.requiredIngredientTerms)) continue;
+      }
+
+      // Minimum spice level filter
+      if (request.minSpiceLevel != null && sel.spice_level < request.minSpiceLevel) continue;
+
       candidates.push({ sel, norm });
     }
 
@@ -198,12 +279,37 @@ export function getCandidatesForPlan(
     for (const sel of selectionRecords) {
       const norm = normalizedById.get(sel.id);
       if (!norm) continue;
-      // Exclude obvious non-dinner items from the flex pool via meal_type
+      // Exclude obvious non-dinner items from the flex pool via meal_type,
+      // UNLESS the user explicitly requested an ingredient that naturally lives
+      // in desserts/breakfast (e.g. "recipes with chocolate", "recipes using oats")
+      // — in that case let the ingredient filter do the work.
+      const hasIngredientFilter = (request.requiredIngredientTerms?.length ?? 0) > 0;
       if (
-        (norm as { meal_type?: string }).meal_type === 'breakfast' ||
-        (norm as { meal_type?: string }).meal_type === 'dessert' ||
-        (norm as { meal_type?: string }).meal_type === 'snack'
+        !hasIngredientFilter && (
+          (norm as { meal_type?: string }).meal_type === 'breakfast' ||
+          (norm as { meal_type?: string }).meal_type === 'dessert' ||
+          (norm as { meal_type?: string }).meal_type === 'snack'
+        )
       ) continue;
+
+      // Hard dish-type filter on flex pool too
+      if (request.allMustMatchTerms?.length) {
+        if (!matchesDishTerms(norm, sel, request.allMustMatchTerms)) continue;
+      }
+
+      // OR dish-type filter on flex pool
+      if (request.anyDishTypes?.length) {
+        if (!matchesAnyDishType(norm, sel, request.anyDishTypes)) continue;
+      }
+
+      // Required ingredient filter on flex pool
+      if (request.requiredIngredientTerms?.length) {
+        if (!matchesRequiredIngredients(norm, request.requiredIngredientTerms)) continue;
+      }
+
+      // Minimum spice level filter on flex pool
+      if (request.minSpiceLevel != null && sel.spice_level < request.minSpiceLevel) continue;
+
       flexCandidates.push({ sel, norm });
     }
     // Pre-sort by weeknight + kid-friendly heuristic so high-quality candidates

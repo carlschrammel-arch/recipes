@@ -115,6 +115,42 @@ export interface WeeklyPlanRequest {
 
   /** Override for max alternatives to show per slot (default 3). */
   maxResults?: number;
+
+  /**
+   * Qualities that should apply to EVERY selected recipe.
+   * Currently supported values: 'cheesy' (recipes with meaningful cheese content).
+   * Populated by phrases like "make them cheesy", "all cheesy recipes".
+   */
+  perRecipePreferences?: string[];
+
+  /**
+   * Dish-type terms that EVERY selected recipe must match (title or tags).
+   * Used when the user's entire request is "N [dish] recipes", e.g.:
+   *   "give me 3 chili recipes" → allMustMatchTerms: ['chili']
+   *   "5 soup dishes" → allMustMatchTerms: ['soup']
+   * This is a hard filter on the candidate pool — unlike requiredTagsOrTitleTerms
+   * which only enforces "at least one".
+   */
+  allMustMatchTerms?: string[];
+
+  /**
+   * Dish-type terms where EACH selected recipe must match AT LEAST ONE (OR logic).
+   * Used for "soups or stews", "noodles or dumplings", etc.
+   * Complements allMustMatchTerms (AND logic per term per recipe).
+   */
+  anyDishTypes?: string[];
+
+  /**
+   * Ingredient terms that EVERY selected recipe must contain in its ingredient list or title.
+   * E.g. ["egg", "chocolate"] from "give me 3 recipes that use eggs and chocolate".
+   */
+  requiredIngredientTerms?: string[];
+
+  /**
+   * Minimum spice level threshold (0–5 scale from SelectionRecord.spice_level).
+   * Used for "spicy recipes" → minSpiceLevel: 2.
+   */
+  minSpiceLevel?: number;
 }
 
 // ============================================================================
@@ -263,6 +299,8 @@ export interface WeeklyPlanResult {
   selectedRecipeIds: string[];
   /** Full NormalizedRecipe objects, in the same order. */
   selectedRecipes: NormalizedRecipe[];
+  /** sel.tags for each selected recipe (from SelectionRecord), parallel to selectedRecipes. */
+  selectedRecipeSelTags: string[][];
   planScore: number;
   planScoreBreakdown: Record<string, number>;
   shoppingOverlap: ShoppingOverlap;

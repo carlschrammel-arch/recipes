@@ -97,6 +97,106 @@ const MEAL_PREP_INGREDIENT_SIGNALS = [
   'brown rice', 'quinoa', 'farro', 'barley',
 ];
 
+// ============================================================================
+// Cheese detection signals
+// ============================================================================
+
+/**
+ * Cheese ingredient terms that constitute a meaningfully cheesy recipe.
+ * Each hit adds substantially to the cheese score.
+ */
+const STRONG_CHEESE_TERMS = [
+  'cheddar', 'mozzarella', 'feta', 'goat cheese', 'cream cheese',
+  'ricotta', 'swiss cheese', 'monterey jack', 'pepper jack', 'provolone',
+  'queso', 'cotija', 'blue cheese', 'gruyere', 'gruyère', 'fontina',
+  'cheese sauce', 'mac and cheese', 'four cheese', 'quattro formaggi',
+  'brie', 'camembert', 'manchego', 'gorgonzola', 'havarti',
+  'muenster', 'colby jack', 'american cheese', 'velveeta',
+  'shredded cheese', 'string cheese', 'cheese blend', 'mixed cheese',
+];
+
+/**
+ * Title terms that strongly indicate a cheesy recipe.
+ * These appear in the dish name and are strong signals.
+ */
+const CHEESE_TITLE_SIGNALS = [
+  'cheesy', 'mac and cheese', 'alfredo', 'carbonara',
+  'four cheese', 'cheese sauce', 'enchilada', 'lasagna',
+  'gratin', 'au gratin', 'parmesan', 'parmigiana', 'parmigiano',
+];
+
+/**
+ * Garnish-level cheese terms — parmesan/romano/pecorino often appear in tiny
+ * quantities (1 tbsp, ¾ oz) as a finishing sprinkle rather than a main component.
+ * These add only a weak signal to the cheese score.
+ */
+const GARNISH_CHEESE_TERMS = [
+  'parmesan', 'romano', 'pecorino', 'asiago', 'parmigiano',
+];
+
+// ============================================================================
+// Cheese scoring (exported for use in optimizer and renderer)
+// ============================================================================
+
+/**
+ * Compute a cheese-presence score in [0, 1] for a recipe.
+ * - 0.0 : no cheese detected
+ * - 0.1–0.2 : parmesan/romano as a garnish only
+ * - 0.35–0.5 : one meaningful cheese ingredient
+ * - 0.6–1.0 : multiple cheeses or cheese as a headline ingredient
+ *
+ * "Creamy" alone is NOT cheesy; pesto alone is NOT cheesy.
+ */
+export function computeCheeseScore(norm: NormalizedRecipe): number {
+  const titleLower = norm.title.toLowerCase();
+  const ingText = norm.ingredients
+    .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
+    .join(' ');
+
+  let score = 0;
+
+  // Title signals add a substantial bonus (recipes named "Cheesy X" are cheesy by design)
+  if (CHEESE_TITLE_SIGNALS.some((t) => titleLower.includes(t))) {
+    score += 0.45;
+  }
+
+  // Count distinct strong cheese hits
+  const strongHits = STRONG_CHEESE_TERMS.filter((t) => ingText.includes(t));
+  score += Math.min(strongHits.length * 0.35, 0.65);
+
+  // Garnish cheese — only add weak signal if no strong cheese already counted
+  if (strongHits.length === 0) {
+    const garnishHits = GARNISH_CHEESE_TERMS.filter((t) => ingText.includes(t));
+    score += Math.min(garnishHits.length * 0.15, 0.2);
+  }
+
+  return Math.min(score, 1.0);
+}
+
+/**
+ * Human-readable label for a cheese score with the primary matched term.
+ */
+export function describeCheeseScore(score: number, norm: NormalizedRecipe): string {
+  const ingText = norm.ingredients
+    .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
+    .join(' ');
+
+  const matchedStrong = STRONG_CHEESE_TERMS.find((t) => ingText.includes(t));
+  const matchedGarnish = GARNISH_CHEESE_TERMS.find((t) => ingText.includes(t));
+  const primary = matchedStrong ?? matchedGarnish;
+
+  if (score >= 0.7) {
+    return `Strong — ${primary ?? 'cheese'} is a core ingredient`;
+  }
+  if (score >= 0.4) {
+    return `Medium — ${primary ?? 'cheese'} present`;
+  }
+  if (score > 0) {
+    return `Weak — ${primary ?? 'cheese'} appears as a garnish`;
+  }
+  return 'None — no cheese detected';
+}
+
 /**
  * Signals for comfort-heavy / creamy pasta format.
  * Used in scoring to detect when comfort mode is relevant.
@@ -379,6 +479,12 @@ const W = {
   comfortFoodRequired: 0.8,  // 'required' mode: treat like a slot requirement
   comfortFoodAvoid: -0.3,    // 'avoid' mode: mild penalty for comfort-heavy recipes
   cuisineBonus: 0.1,
+  /**
+   * Per-recipe preference: cheesy fit score multiplier.
+   * Applied when request.perRecipePreferences includes 'cheesy'.
+   * High weight so cheesy recipes strongly dominate in an all-cheesy plan.
+   */
+  cheesyFit: 2.0,
   /**
    * Penalty for recipes that are clearly breakfast, dessert, or snack items
    * in a dinner-plan context. Applied based on meal_type and title signals.
@@ -702,6 +808,14 @@ export function scoreRecipeForRequest(
     );
     breakdown.preferredIngredients = prefScore;
     score += prefScore;
+  }
+
+  // ---------- Per-recipe preferences (e.g. cheesy) ----------
+  if (request.perRecipePreferences?.includes('cheesy')) {
+    const cheeseScore = computeCheeseScore(norm);
+    // Score ranges 0–2.0: 0 for no cheese, 2.0 for maximally cheesy recipe
+    breakdown.cheesyFit = cheeseScore * W.cheesyFit;
+    score += breakdown.cheesyFit;
   }
 
   // ---------- Pasta bonus ----------

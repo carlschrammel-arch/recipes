@@ -12,6 +12,7 @@
 import type { WeeklyPlanResult, CandidateScore, EnrichmentSummary } from './types.js';
 import type { NormalizedRecipe } from '../types.js';
 import { calculateMacroPercentages } from './macro-calculator.js';
+import { computeCheeseScore, describeCheeseScore } from './scoring.js';
 
 // ============================================================================
 // Helpers
@@ -318,6 +319,13 @@ export function renderPlanAsMarkdown(
     const badges = formatBadges(recipe);
     if (badges) lines.push(`**Tags:** ${badges}`);
 
+    // Cheesy fit line (only when cheesy preference was requested)
+    if (request.perRecipePreferences?.includes('cheesy')) {
+      const cheeseScore = computeCheeseScore(recipe);
+      const cheeseDesc = describeCheeseScore(cheeseScore, recipe);
+      lines.push(`**Cheesy fit:** ${cheeseDesc}`);
+    }
+
     lines.push('');
     const nutritionLines = formatNutritionLines(recipe);
     for (const nl of nutritionLines) {
@@ -378,21 +386,51 @@ export function renderPlanAsMarkdown(
     slotCounts[s] = (slotCounts[s] ?? 0) + 1;
   }
   for (const [slot, count] of Object.entries(slotCounts)) {
-    const matchingRecipe = selectedRecipes.find((r, i) =>
+    const matchingRecipes = selectedRecipes.filter((r, i) =>
       effectiveSlots[i] === slot
     );
+    const hasAll = matchingRecipes.length >= count;
+    const titleList = matchingRecipes.map((r) => r.title).join(', ') || 'Not filled';
     lines.push(
-      `| ${count} ${slot} | ${matchingRecipe ? '✅' : '❌'} | ${matchingRecipe ? matchingRecipe.title : 'Not filled'} |`
+      `| ${count} ${slot} | ${hasAll ? '✅' : '❌'} | ${titleList} |`
     );
   }
 
-  // Flex meals
+  // Flex meals — show dish-type or cheesy coverage when those constraints are active
   if ((request.flexMealCount ?? 0) > 0) {
-    const flexRecipes = selectedRecipes.slice(request.requiredProteinSlots.length);
-    const flexFilled = flexRecipes.length;
-    lines.push(
-      `| ${request.flexMealCount} flex meal(s) | ${flexFilled >= (request.flexMealCount ?? 0) ? '✅' : '⚠️'} | ${flexRecipes.map((r) => r.title).join(', ') || 'Not filled'} |`
-    );
+    if (request.allMustMatchTerms?.length) {
+      // Dish-type constraint: all recipes must match the term(s)
+      // Use sel.tags (from SelectionRecord) for matching — same source as the candidate filter.
+      const terms = request.allMustMatchTerms;
+      const termLabel = terms.join(' + ');
+      const flexRecipes = selectedRecipes.slice(request.requiredProteinSlots.length);
+      const flexSelTags = result.selectedRecipeSelTags.slice(request.requiredProteinSlots.length);
+      const matchCount = flexRecipes.filter((r, j) => {
+        const title = r.title.toLowerCase().replace(/-/g, ' ');
+        const tags = (flexSelTags[j] ?? r.tags).map((t) => t.toLowerCase().replace(/-/g, ' '));
+        return terms.every((term) => title.includes(term.toLowerCase()) || tags.some((tag) => tag.includes(term.toLowerCase())));
+      }).length;
+      const total = flexRecipes.length;
+      const dishStatus = matchCount >= total ? '✅' : matchCount > 0 ? '⚠️' : '❌';
+      lines.push(
+        `| All ${total} must be ${termLabel} | ${dishStatus} | ${matchCount} of ${total} matched |`
+      );
+    } else if (request.perRecipePreferences?.includes('cheesy')) {
+      const flexRecipes = selectedRecipes.slice(request.requiredProteinSlots.length);
+      const cheeseScores = flexRecipes.map((r) => computeCheeseScore(r));
+      const meaningfullyCheesy = cheeseScores.filter((s) => s >= 0.4).length;
+      const total = flexRecipes.length;
+      const cheesyStatus = meaningfullyCheesy >= total ? '✅' : meaningfullyCheesy >= Math.ceil(total * 0.6) ? '⚠️' : '❌';
+      lines.push(
+        `| Cheesy recipes | ${cheesyStatus} | ${meaningfullyCheesy} of ${total} meaningfully cheesy |`
+      );
+    } else {
+      const flexRecipes = selectedRecipes.slice(request.requiredProteinSlots.length);
+      const flexFilled = flexRecipes.length;
+      lines.push(
+        `| ${request.flexMealCount} flex meal(s) | ${flexFilled >= (request.flexMealCount ?? 0) ? '✅' : '⚠️'} | ${flexRecipes.map((r) => r.title).join(', ') || 'Not filled'} |`
+      );
+    }
   }
 
   // Kid-friendly minimum
@@ -436,6 +474,43 @@ export function renderPlanAsMarkdown(
     lines.push(
       `| ≥1 ${cuisine} recipe | ${match ? '✅' : '❌'} | ${match ? match.title : `No ${cuisine} recipe found`} |`
     );
+  }
+
+  // anyDishTypes (OR logic — each recipe must match at least one)
+  if (request.anyDishTypes?.length) {
+    const terms = request.anyDishTypes;
+    const termLabel = terms.join(' or ');
+    const matchCount = selectedRecipes.filter((r, i) => {
+      const title = r.title.toLowerCase();
+      const selTags = (result.selectedRecipeSelTags[i] ?? r.tags).map((t) => t.toLowerCase());
+      return terms.some((term) => title.includes(term.toLowerCase()) || selTags.some((tag) => tag.includes(term.toLowerCase())));
+    }).length;
+    const total = selectedRecipes.length;
+    const status = matchCount >= total ? '✅' : matchCount > 0 ? '⚠️' : '❌';
+    lines.push(`| All must be ${termLabel} | ${status} | ${matchCount} of ${total} matched |`);
+  }
+
+  // requiredIngredientTerms
+  if (request.requiredIngredientTerms?.length) {
+    for (const ing of request.requiredIngredientTerms) {
+      const matchCount = selectedRecipes.filter((r) => {
+        const ingText = r.ingredients.map((i) => (i.ingredient + ' ' + i.original).toLowerCase()).join(' ');
+        return ingText.includes(ing.toLowerCase()) || r.title.toLowerCase().includes(ing.toLowerCase());
+      }).length;
+      const total = selectedRecipes.length;
+      const status = matchCount >= total ? '✅' : matchCount > 0 ? '⚠️' : '❌';
+      lines.push(`| All must contain "${ing}" | ${status} | ${matchCount} of ${total} matched |`);
+    }
+  }
+
+  // minSpiceLevel
+  if (request.minSpiceLevel != null) {
+    const spiceLabels = ['not spicy', 'mild', 'medium', 'hot', 'very hot', 'extreme'];
+    const label = spiceLabels[request.minSpiceLevel] ?? `≥${request.minSpiceLevel}`;
+    const matchCount = selectedRecipes.filter((r) => (r.spice_level ?? 0) >= request.minSpiceLevel!).length;
+    const total = selectedRecipes.length;
+    const status = matchCount >= total ? '✅' : matchCount > 0 ? '⚠️' : '❌';
+    lines.push(`| All must be ≥${label} spicy | ${status} | ${matchCount} of ${total} recipes qualify |`);
   }
 
   // Macro targets

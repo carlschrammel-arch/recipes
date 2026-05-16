@@ -31,7 +31,7 @@ import type {
 import type { NormalizedRecipe } from '../types.js';
 import type { SelectionRecord } from '../selection-index.js';
 import { getCandidatesForPlan, hasSourceSignal, hasTagOrTitleTerm } from './candidate-filter.js';
-import { scoreRecipeForRequest, getCanonicalIngredientKeys } from './scoring.js';
+import { scoreRecipeForRequest, getCanonicalIngredientKeys, computeCheeseScore } from './scoring.js';
 import { validatePlanResult } from './validation.js';
 
 // ============================================================================
@@ -913,10 +913,60 @@ function computeRequestFitSummary(
 
   // --- Structural constraints ---
   if (validation.structuralConstraintsSatisfied) {
-    strongMatches.push('All required protein slots filled');
+    if (request.requiredProteinSlots.length > 0) {
+      strongMatches.push('All required protein slots filled');
+    } else if (request.allMustMatchTerms?.length) {
+      const termLabel = request.allMustMatchTerms.join(' + ');
+      strongMatches.push(`${selectedRecipes.length} ${termLabel} recipes selected`);
+    } else {
+      strongMatches.push(`${selectedRecipes.length} flex recipes selected`);
+    }
   } else {
     for (const fc of validation.failedConstraints) {
       weakSpots.push(`Constraint failed: ${fc}`);
+    }
+  }
+
+  // --- Dish-type constraint summary (allMustMatchTerms) ---
+  if (request.allMustMatchTerms?.length) {
+    const terms = request.allMustMatchTerms;
+    const matchCount = selectedRecipes.filter((r) => {
+      const title = r.title.toLowerCase();
+      const tags = r.tags.map((t) => t.toLowerCase());
+      return terms.every((term) =>
+        title.includes(term.toLowerCase()) ||
+        tags.some((tag) => tag.includes(term.toLowerCase()))
+      );
+    }).length;
+    const total = selectedRecipes.length;
+    const termLabel = terms.join(' + ');
+    if (matchCount < total) {
+      weakSpots.push(
+        `Dish-type filter: only ${matchCount} of ${total} recipes matched "${termLabel}". ` +
+        `Your catalog may have limited ${termLabel} recipes.`
+      );
+    }
+  }
+
+  // --- Per-recipe preferences (e.g. cheesy) ---
+  if (request.perRecipePreferences?.includes('cheesy')) {
+    const cheeseScores = selectedRecipes.map((r) => computeCheeseScore(r));
+    const strongCount = cheeseScores.filter((s) => s >= 0.4).length;
+    const total = selectedRecipes.length;
+    if (strongCount >= total) {
+      strongMatches.push(`Cheesy preference: all ${total} recipes are meaningfully cheesy`);
+    } else if (strongCount >= Math.ceil(total * 0.6)) {
+      weakSpots.push(`Cheesy preference: ${strongCount} of ${total} recipes are meaningfully cheesy`);
+      suggestedImprovements.push(
+        'Look for recipes with feta, cheddar, ricotta, or cheese sauce as a core ingredient'
+      );
+    } else {
+      weakSpots.push(
+        `Cheesy preference poorly met: only ${strongCount} of ${total} recipes are meaningfully cheesy`
+      );
+      suggestedImprovements.push(
+        'Look for recipes with feta, cheddar, ricotta, or cheese sauce as a core ingredient'
+      );
     }
   }
 
@@ -1229,8 +1279,24 @@ export function buildWeeklyPlan(
   }
 
   // --- 3. Beam search through slots (required first, then flex) ---
+  // Build unique keys for protein slots so duplicate types (e.g. ['chicken','chicken','chicken'])
+  // don't overwrite each other in the assignments Map. Mirrors how flex slots work.
+  const proteinSlotKeys = request.requiredProteinSlots.map((slot, i) => {
+    const priorCount = request.requiredProteinSlots.slice(0, i).filter((s) => s === slot).length;
+    const totalCount = request.requiredProteinSlots.filter((s) => s === slot).length;
+    return totalCount > 1 ? `${slot}_${priorCount}` : slot;
+  });
+  // Point each unique key to the same scored pool as the base protein type
+  for (let i = 0; i < proteinSlotKeys.length; i++) {
+    const key = proteinSlotKeys[i];
+    const baseSlot = request.requiredProteinSlots[i];
+    if (key !== baseSlot) {
+      scoredBySlot.set(key, scoredBySlot.get(baseSlot) ?? []);
+    }
+  }
+
   const slotOrder = [
-    ...request.requiredProteinSlots,
+    ...proteinSlotKeys,
     ...flexSlotKeys,
   ];
 
@@ -1333,6 +1399,7 @@ export function buildWeeklyPlan(
 
   // --- 6. Assemble output ---
   const selectedRecipes = [...bestPlan.assignments.values()].map((r) => r.norm);
+  const selectedRecipeSelTags = [...bestPlan.assignments.values()].map((r) => r.sel.tags);
   const selectedRecipeIds = selectedRecipes.map((r) => r.id);
 
   // Shopping overlap
@@ -1396,6 +1463,7 @@ export function buildWeeklyPlan(
     request,
     selectedRecipeIds,
     selectedRecipes,
+    selectedRecipeSelTags,
     planScore,
     planScoreBreakdown: planBreakdown,
     shoppingOverlap,

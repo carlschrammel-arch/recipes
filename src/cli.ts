@@ -484,7 +484,7 @@ Environment:
         verbose: options.verbose,
         json: options.json,
         maxCandidatesPerSlot: options.maxCandidates,
-        noAiParser: options['no-ai-parser'],
+        noAiParser: options.aiParser === false,
         explain: options.explain,
         // History is excluded by default.
         // Commander.js: --include-history → options.includeHistory

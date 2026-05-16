@@ -202,21 +202,23 @@ export function validatePlanResult(
   // ---- 4. Protein slot satisfaction ----
   // We verify this indirectly: candidate-filter already enforces slot matching,
   // but we do a sanity check here for vegetarian/vegan slots.
-  for (const recipe of selectedRecipes) {
-    const slot = request.requiredProteinSlots.find((s) => {
-      if (s === 'vegetarian' || s === 'vegan') {
-        const ingText = recipe.ingredients
-          .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
-          .join(' ');
-        return !MEAT_TERMS.some((t) => ingText.includes(t));
+  if (request.requiredProteinSlots.length > 0) {
+    for (const recipe of selectedRecipes) {
+      const slot = request.requiredProteinSlots.find((s) => {
+        if (s === 'vegetarian' || s === 'vegan') {
+          const ingText = recipe.ingredients
+            .map((i) => i.ingredient.toLowerCase() + ' ' + i.original.toLowerCase())
+            .join(' ');
+          return !MEAT_TERMS.some((t) => ingText.includes(t));
+        }
+        return true; // Other slots were enforced by the candidate filter
+      });
+      if (slot === undefined) {
+        warnings.push(
+          `Recipe "${recipe.title}" may not satisfy its assigned protein slot. ` +
+          'Please review the plan.'
+        );
       }
-      return true; // Other slots were enforced by the candidate filter
-    });
-    if (slot === undefined) {
-      warnings.push(
-        `Recipe "${recipe.title}" may not satisfy its assigned protein slot. ` +
-        'Please review the plan.'
-      );
     }
   }
 
